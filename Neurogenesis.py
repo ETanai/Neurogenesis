@@ -17,8 +17,9 @@ from collections import Counter
 from typing import Union
 import pandas as pd
 from datetime import datetime
-from torch.utils.tensorboard import SummaryWriter
 import torchvision.utils
+from sklearn.cluster import KMeans
+from torch.utils.tensorboard import SummaryWriter
 #%%
 # Model Definition
 class NGAutoencoder(nn.Module):
@@ -50,6 +51,7 @@ class NGAutoencoder(nn.Module):
 
         # Initialize a list to track layer sizes over time
         self.layer_size_history = [self.hidden_sizes.copy()]
+        self.return_encoded = False
 
     def build_encoder(self):
         layers = []
@@ -72,7 +74,7 @@ class NGAutoencoder(nn.Module):
         layer = NGLinear(in_dim, out_features_old=self.input_dim)
         layers.append(layer)
         return layers
-
+    
     def get_layer_sizes(self):
         sizes = []
         for layer in self.encoder_layers + self.decoder_layers:
@@ -101,7 +103,8 @@ class NGAutoencoder(nn.Module):
             decoded = layer(decoded)
             if self.act_func is not None:
                 decoded = self.act_func(decoded)
-        return decoded
+        if self.return_encoded: return encoded, decoded
+        else: return decoded
 
     def add_nodes(self, layer_idx, num_new_nodes):
         # Update hidden sizes
@@ -453,7 +456,146 @@ class Trainer:
         plt.tight_layout()
         plt.show()
 
+class ClusteredTrainer:
+    def __init__(self, model, criterion, optimizer, scheduler=None, alpha=1.0, n_clusters=2, writer=None):
+        self.model = model
+        self.criterion = criterion  # Reconstruction loss criterion
+        self.optimizer = optimizer
+        self.scheduler = scheduler
+        self.alpha = alpha  # Weighting factor for clustering loss
+        self.n_clusters = n_clusters  # Number of clusters/classes
+        self.training_losses = []
+        self.test_losses = []
+        self.training_reconstruction_losses = []
+        self.training_clustering_losses = []
+        self.test_reconstruction_losses = []
+        self.test_clustering_losses = []
+        self.device = next(model.parameters()).device  # Device (CPU or GPU)
+        self.cluster_centers = None  # Will be initialized later
+        self.writer = writer  # TensorBoard writer
 
+    def initialize_cluster_centers(self, data_loader):
+        # Extract latent representations
+        all_latents = []
+        self.model.eval()
+        with torch.no_grad():
+            for data, _ in data_loader:
+                data = data.view(data.size(0), -1).to(self.device)
+                latent = self.model.encoder(data)
+                all_latents.append(latent)
+        all_latents = torch.cat(all_latents).cpu().numpy()
+
+        # Perform KMeans clustering on latent space to initialize cluster centers
+        kmeans = KMeans(n_clusters=self.n_clusters, n_init=20)
+        kmeans.fit(all_latents)
+        self.cluster_centers = torch.tensor(kmeans.cluster_centers_, dtype=torch.float32).to(self.device)
+
+    def update_cluster_centers(self, data_loader):
+        # Update cluster centers based on new latent representations
+        self.initialize_cluster_centers(data_loader)
+
+    def target_distribution(self, q):
+        weight = (q ** 2) / q.sum(0)
+        return (weight.T / weight.sum(1)).T
+
+    def train(self, train_loader, test_loader=None, epochs=1, cluster_update_interval=1):
+        # Initialize cluster centers
+        self.initialize_cluster_centers(train_loader)
+
+        epoch_bar = tqdm(range(epochs), desc='Training Progress')
+        for epoch in epoch_bar:
+            self.model.train()
+            epoch_reconstruction_losses = []
+            epoch_clustering_losses = []
+            epoch_combined_losses = []
+            batch_bar = tqdm(train_loader, desc=f'Epoch {epoch + 1}/{epochs}', leave=False)
+            for data, _ in batch_bar:
+                data = data.view(data.size(0), -1).to(self.device)
+                # Forward pass
+                latent = self.model.encoder(data)
+                output = self.model.decoder(latent)
+                # Reconstruction loss
+                reconstruction_loss = self.criterion(output, data)
+                # Clustering loss
+                q = 1.0 / (1.0 + torch.cdist(latent, self.cluster_centers, p=2) ** 2)
+                q = (q.T / q.sum(1)).T  # Normalize per sample
+                # Compute target distribution
+                p = self.target_distribution(q)
+                # KL divergence loss
+                kl_loss = F.kl_div(q.log(), p, reduction='batchmean')
+                # Total loss
+                loss = reconstruction_loss + self.alpha * kl_loss
+
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+
+                epoch_reconstruction_losses.append(reconstruction_loss.item())
+                epoch_clustering_losses.append(kl_loss.item())
+                epoch_combined_losses.append(loss.item())
+                batch_bar.set_postfix(loss=loss.item())
+
+            if self.scheduler:
+                self.scheduler.step()
+
+            # Log average losses
+            avg_reconstruction_loss = sum(epoch_reconstruction_losses) / len(epoch_reconstruction_losses)
+            avg_clustering_loss = sum(epoch_clustering_losses) / len(epoch_clustering_losses)
+            avg_combined_loss = sum(epoch_combined_losses) / len(epoch_combined_losses)
+            self.training_losses.append(avg_combined_loss)
+            self.training_reconstruction_losses.append(avg_reconstruction_loss)
+            self.training_clustering_losses.append(avg_clustering_loss)
+            print(f"Epoch {epoch + 1}/{epochs} - Reconstruction Loss: {avg_reconstruction_loss:.4f}, Clustering Loss: {avg_clustering_loss:.4f}, Combined Loss: {avg_combined_loss:.4f}")
+
+            # Update cluster centers periodically
+            if (epoch + 1) % cluster_update_interval == 0:
+                self.update_cluster_centers(train_loader)
+
+            # Optionally, evaluate on test_loader
+            if test_loader:
+                test_reconstruction_loss, test_clustering_loss, test_combined_loss = self.test(test_loader)
+                self.test_losses.append(test_combined_loss)
+                self.test_reconstruction_losses.append(test_reconstruction_loss)
+                self.test_clustering_losses.append(test_clustering_loss)
+                # Log test losses
+                if self.writer is not None:
+                    self.writer.add_scalars('Loss/Combined', {'Training': avg_combined_loss, 'Test': test_combined_loss}, epoch + 1)
+                    self.writer.add_scalars('Loss/Reconstruction', {'Training': avg_reconstruction_loss, 'Test': test_reconstruction_loss}, epoch + 1)
+                    self.writer.add_scalars('Loss/Clustering', {'Training': avg_clustering_loss, 'Test': test_clustering_loss}, epoch + 1)
+            else:
+                if self.writer is not None:
+                    self.writer.add_scalar('Loss/Combined/Training', avg_combined_loss, epoch + 1)
+                    self.writer.add_scalar('Loss/Reconstruction/Training', avg_reconstruction_loss, epoch + 1)
+                    self.writer.add_scalar('Loss/Clustering/Training', avg_clustering_loss, epoch + 1)
+
+    def test(self, test_loader):
+        self.model.eval()
+        total_reconstruction_loss = 0
+        total_clustering_loss = 0
+        total_combined_loss = 0
+        with torch.no_grad():
+            for data, _ in test_loader:
+                data = data.view(data.size(0), -1).to(self.device)
+                latent = self.model.encoder(data)
+                output = self.model.decoder(latent)
+                reconstruction_loss = self.criterion(output, data)
+                q = 1.0 / (1.0 + torch.cdist(latent, self.cluster_centers, p=2) ** 2)
+                q = (q.T / q.sum(1)).T  # Normalize per sample
+                # Compute target distribution
+                p = self.target_distribution(q)
+                # KL divergence loss
+                kl_loss = F.kl_div(q.log(), p, reduction='batchmean')
+                # Total loss
+                loss = reconstruction_loss + self.alpha * kl_loss
+
+                total_reconstruction_loss += reconstruction_loss.item()
+                total_clustering_loss += kl_loss.item()
+                total_combined_loss += loss.item()
+
+        average_reconstruction_loss = total_reconstruction_loss / len(test_loader)
+        average_clustering_loss = total_clustering_loss / len(test_loader)
+        average_combined_loss = total_combined_loss / len(test_loader)
+        return average_reconstruction_loss, average_clustering_loss, average_combined_loss
 #%%
 # NGTrainer Class Definition
 class NGTrainer:
@@ -526,6 +668,37 @@ class NGTrainer:
         loss_stats = self._compute_losses_per_layer_per_class(self.test_loader_pretrained)
         self.thresholds = self._get_thresholds_from_statistics_range(loss_stats=loss_stats, factor=self.factor_thr, metric=self.metric_threshould)
         print("Pretraining completed.")
+
+    def pretrain_model_clustered(self, alpha=1.0, cluster_update_interval=1):
+        """
+        Pretrains the model on the specified pretrained classes with clustering in the latent space.
+        """
+        print("Starting pretraining with clustering...")
+        trainer = ClusteredTrainer(
+            model=self.model,
+            criterion=self.criterion,
+            optimizer=self.optimizer,
+            scheduler=self.scheduler,
+            alpha=alpha,
+            n_clusters=len(self.pretrained_classes),
+            writer=self.writer  # Pass the writer here
+        )
+        trainer.train(
+            train_loader=self.train_loader_pretrained,
+            test_loader=self.test_loader_pretrained,
+            epochs=self.epochs,
+            cluster_update_interval=cluster_update_interval
+        )
+        self.training_losses.extend(trainer.training_losses)
+        self.test_losses.extend(trainer.test_losses)
+        # Compute thresholds if needed
+        loss_stats = self._compute_losses_per_layer_per_class(self.test_loader_pretrained)
+        self.thresholds = self._get_thresholds_from_statistics_range(
+            loss_stats=loss_stats,
+            factor=self.factor_thr,
+            metric=self.metric_threshould
+        )
+        print("Pretraining with clustering completed.")
 
     def apply_neurogenesis(self):
         """
@@ -1024,7 +1197,7 @@ class NGTrainer:
                 original_images.extend(data.view(-1, 1, 28, 28).cpu())
                 reconstructed_images.extend(output.cpu())
 
-        # Get synthetic images from intrinsic replay if available
+        # Get synthetic images from intrinsic replay if available  
         _new_data_loader, _stability_loader, synthetic_dataset = self._create_data_loaders(n=n)
         # Filter synthetic dataset for the specified class
         synthetic_class_indices = [i for i, (_, label) in enumerate(synthetic_dataset) if label == class_label]
@@ -1120,6 +1293,7 @@ if __name__ == "__main__":
 
     # Data transformations
     transform = transforms.Compose([
+        transforms.RandomRotation(degrees=(-20, 20)),
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,))
     ])
@@ -1147,7 +1321,7 @@ if __name__ == "__main__":
                            batch_size=batch_size,
                            lr=1e-3,
                            lr_factor=1e-2,
-                           epochs=100,
+                           epochs=5,
                            epochs_per_iteration=5,
                            max_nodes=[1500, 800, 500, 200],
                            max_outliers=5,
@@ -1156,7 +1330,7 @@ if __name__ == "__main__":
                            metric_threshould='max')
 
     # Pretrain the model
-    ng_trainer.pretrain_model()
+    ng_trainer.pretrain_model_clustered()
 
     # Apply neurogenesis
     layergroth = ng_trainer.apply_neurogenesis()
