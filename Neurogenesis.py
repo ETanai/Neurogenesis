@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torchvision import datasets, transforms
-from torch.utils.data import DataLoader, Subset, Dataset, ConcatDataset
+from torch.utils.data import DataLoader, Subset, Dataset, ConcatDataset, TensorDataset
 import torch.nn.functional as F
 from tqdm.notebook import tqdm
 import matplotlib.pyplot as plt
@@ -19,11 +19,30 @@ import pandas as pd
 from datetime import datetime
 import torchvision.utils
 from sklearn.cluster import KMeans
+import random
 from torch.utils.tensorboard import SummaryWriter
 #%%
+# custom losses
+class ContrastiveLoss(nn.Module):
+    def __init__(self, margin=1.0):
+        super(ContrastiveLoss, self).__init__()
+        self.margin = margin
+
+    def forward(self, embedding1, embedding2, label):
+        # Calculate the Euclidean distance between the two embeddings
+        distance = F.pairwise_distance(embedding1, embedding2)
+
+        # Contrastive Loss function
+        loss_positive = label * torch.pow(distance, 2)  # For positive pairs
+        loss_negative = (1 - label) * torch.pow(torch.clamp(self.margin - distance, min=0.0), 2)  # For negative pairs
+
+        # Average the loss over the batch
+        loss = 0.5 * (loss_positive + loss_negative).mean()
+        return loss
+# %%
 # Model Definition
 class NGAutoencoder(nn.Module):
-    def __init__(self, input_dim, hidden_sizes, act_func=None, classification_head=None, num_classes_pretraining=None, classification_size=None):
+    def __init__(self, input_dim, hidden_sizes, act_func=None, classification_head=None, num_classes_pretraining=None, classification_size=None, dropout=None):
         """
         Initializes the NGAutoencoder.
 
@@ -42,6 +61,7 @@ class NGAutoencoder(nn.Module):
         self.return_encoded = False
         self.classification_head=classification_head or False
         self.num_classes_pretraining= num_classes_pretraining or None
+        self.dropout = dropout or 0
 
         # Build encoder and decoder layers
         self.encoder_layers = self.build_encoder()
@@ -61,9 +81,13 @@ class NGAutoencoder(nn.Module):
     def build_encoder(self):
         layers = []
         in_dim = self.input_dim
-        for out_dim in self.hidden_sizes:
+        num_layers = len(self.hidden_sizes)
+        for i, out_dim in enumerate(self.hidden_sizes):
             layer = NGLinear(in_dim, out_features_old=out_dim)
             layers.append(layer)
+            if i < num_layers - 1:
+                dropout_layer = nn.Dropout(self.dropout)
+                layers.append(dropout_layer)
             in_dim = out_dim
         return layers
 
@@ -71,9 +95,12 @@ class NGAutoencoder(nn.Module):
         layers = []
         reversed_hidden_sizes = list(reversed(self.hidden_sizes))
         in_dim = reversed_hidden_sizes[0]
-        for out_dim in reversed_hidden_sizes[1:]:
+        num_layers = len(reversed_hidden_sizes)
+        for i, out_dim in enumerate(reversed_hidden_sizes[1:]):
             layer = NGLinear(in_dim, out_features_old=out_dim)
             layers.append(layer)
+            dropout_layer = nn.Dropout(self.dropout)
+            layers.append(dropout_layer)
             in_dim = out_dim
         # Final decoder layer should map back to input_dim
         layer = NGLinear(in_dim, out_features_old=self.input_dim)
@@ -89,6 +116,7 @@ class NGAutoencoder(nn.Module):
         )
         return classifier
     
+
     def get_layer_sizes(self):
         sizes = []
         for layer in self.encoder_layers + self.decoder_layers:
@@ -207,6 +235,27 @@ class NGAutoencoder(nn.Module):
         for layer in self.encoder_layers + self.decoder_layers:
             if isinstance(layer, NGLinear):
                 layer.promote_new_to_old()
+
+    def remove_dropout_from_sequential(self, sequential):
+        """Remove all Dropout layers from a Sequential module."""
+        layers = [layer for layer in sequential if not isinstance(layer, nn.Dropout)]
+        return nn.Sequential(*layers)
+
+    def remove_all_dropout(self):
+        """Remove all Dropout layers from the encoder, decoder, and their layers."""
+        def remove_dropout_from_list(layers):
+            return [layer for layer in layers if not isinstance(layer, nn.Dropout)]
+        
+        # Update encoder layers and Sequential
+        self.encoder_layers = remove_dropout_from_list(self.encoder_layers)
+        self.encoder = nn.Sequential(*self.encoder_layers)
+
+        # Update decoder layers and Sequential
+        self.decoder_layers = remove_dropout_from_list(self.decoder_layers)
+        self.decoder = nn.Sequential(*self.decoder_layers)
+
+        print("All Dropout layers have been removed.")
+
 # Custom Linear Layer
 class NGLinear(nn.Module):
     def __init__(self, in_features, out_features_old, out_features_new=0):
@@ -401,13 +450,17 @@ def create_synthetic_dataset(encoder, decoder, data_loader, num_samples_per_clas
 #%%
 # Training Utilities
 class Trainer:
-    def __init__(self, model, criterion, optimizer, scheduler=None):
+    def __init__(self, model, criterion, optimizer, scheduler=None, rc_n_samples=4, pretrained_classes=[], get_samples_and_reconstructions=None, log_samples_to_tensorboard=None):
         self.model = model
         self.criterion = criterion
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.training_losses = []
         self.test_losses = []
+        self.rc_n_samples = rc_n_samples
+        self.pretrained_classes = pretrained_classes
+        self.get_samples_and_reconstructions = get_samples_and_reconstructions
+        self.log_samples_to_tensorboard = log_samples_to_tensorboard
 
     def train(self, train_loader, test_loader=None, epochs=1):
         epoch_bar = tqdm(range(epochs), desc='Training Progress')
@@ -427,6 +480,7 @@ class Trainer:
                 epoch_losses.append(loss.item())
                 batch_bar.set_postfix(loss=loss.item())
             if self.scheduler:
+                writer.add_scalars('Learning Rate Schedule', {'Learning Rate': self.scheduler.get_last_lr()[-1]}, epoch + 1)
                 self.scheduler.step()
 
             training_loss = sum(epoch_losses) / len(epoch_losses)
@@ -437,6 +491,13 @@ class Trainer:
                 self.test_losses.append(test_loss)
                 #self.plot_losses(epoch + 1)
                 writer.add_scalars('Loss_Pretraining', {'Training': training_loss, 'Test': test_loss}, epoch + 1)
+                
+                if epoch % 10 == 0:
+                    for c in self.pretrained_classes:
+                        # Get the images
+                        original_imgs, reconstructed_imgs, synthetic_imgs = self.get_samples_and_reconstructions(c, self.rc_n_samples, synthetic=False)
+                        # Log them to TensorBoard
+                        self.log_samples_to_tensorboard(original_imgs, reconstructed_imgs, synthetic_imgs, c, epoch)
 
     def test(self, test_loader, l=None):
         self.model.eval()
@@ -555,7 +616,7 @@ class ClusteredTrainer:
                 epoch_clustering_losses.append(kl_loss.item())
                 epoch_combined_losses.append(loss.item())
                 batch_bar.set_postfix(loss=loss.item())
-
+            lr_old = self.optimizer.lern
             if self.scheduler:
                 self.scheduler.step()
 
@@ -618,7 +679,7 @@ class ClusteredTrainer:
         average_combined_loss = total_combined_loss / len(test_loader)
         return average_reconstruction_loss, average_clustering_loss, average_combined_loss
 
-class TrainerWithClassification:
+class ClassificationTrainer:
     def __init__(self, model, recon_criterion, class_criterion, classes_pretraining, optimizer, scheduler=None, alpha=1.0):
         """
         Initializes the trainer with reconstruction and classification criteria.
@@ -658,7 +719,7 @@ class TrainerWithClassification:
                 # Compute losses
                 recon_loss = self.recon_criterion(reconstruction, data)
                 class_loss = self.class_criterion(class_logits, labels)
-                total_loss = recon_loss + self.alpha * class_loss
+                total_loss = (recon_loss) + (self.alpha * class_loss)
                 
                 # Backward pass and optimization
                 self.optimizer.zero_grad()
@@ -681,7 +742,7 @@ class TrainerWithClassification:
             self.training_losses.append((avg_recon_loss, avg_class_loss))
             
             if test_loader:
-                test_recon_loss, test_class_loss = self.test(test_loader)
+                test_recon_loss, test_class_loss, cm = self.test(test_loader)
                 self.test_losses.append((test_recon_loss, test_class_loss))
                 if writer:
                     writer.add_scalars('Pretraining', {
@@ -690,7 +751,11 @@ class TrainerWithClassification:
                         'Test_Reconstruction': test_recon_loss,
                         'Test_Classification': test_class_loss
                     }, epoch + 1)
-            
+                            # Add confusion matrix to TensorBoard
+                class_names = [str(c) for c in self.class_map.values()]
+                cm_fig = self.plot_confusion_matrix(cm, class_names)
+                writer.add_figure('Confusion Matrix', cm_fig, global_step=epoch + 1)
+                    
             # Update epoch description
             epoch_bar.set_postfix(
                 Training_Recon_Loss=avg_recon_loss,
@@ -703,6 +768,8 @@ class TrainerWithClassification:
         self.model.eval()
         total_recon_loss = 0
         total_class_loss = 0
+        all_preds = []
+        all_targets = []
         with torch.no_grad():
             for data, labels in tqdm(test_loader, desc='Testing', leave=False):
                 data = data.view(data.size(0), -1)
@@ -713,16 +780,237 @@ class TrainerWithClassification:
                 class_loss = self.class_criterion(class_logits, labels)
                 total_recon_loss += recon_loss.item()
                 total_class_loss += class_loss.item()
+
+                # Collect predictions and true labels for confusion matrix
+                _, preds = torch.max(class_logits, 1)
+                all_preds.extend(preds.cpu().numpy())
+                all_targets.extend(labels.cpu().numpy())
         
         average_recon_loss = total_recon_loss / len(test_loader)
         average_class_loss = total_class_loss / len(test_loader)
-        return average_recon_loss, average_class_loss
+        
+        # Compute confusion matrix
+        from sklearn.metrics import confusion_matrix
+        cm = confusion_matrix(all_targets, all_preds)
+        
+        return average_recon_loss, average_class_loss, cm
+
+    def plot_confusion_matrix(self, cm, class_names):
+        import matplotlib.pyplot as plt
+        import numpy as np
+        figure = plt.figure(figsize=(8, 8))
+        plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+        plt.title("Confusion Matrix")
+        plt.colorbar()
+        tick_marks = np.arange(len(class_names))
+        plt.xticks(tick_marks, class_names, rotation=45)
+        plt.yticks(tick_marks, class_names)
+        
+        # Normalize the confusion matrix
+        cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        
+        # Add text in each cell
+        thresh = cm.max() / 2.
+        for i, j in np.ndindex(cm.shape):
+            plt.text(j, i, f"{cm_normalized[i, j]:.2f}",
+                    horizontalalignment="center",
+                    color="white" if cm[i, j] > thresh else "black")
+        
+        plt.tight_layout()
+        plt.ylabel('True label')
+        plt.xlabel('Predicted label')
+        return figure
+
+class ContrastTrainer:
+    def __init__(self, model, criterion, optimizer, scheduler=None, alpha=1.0, writer=None, batch_size=None):
+        self.model = model
+        self.criterion = criterion
+        self.optimizer = optimizer
+        self.scheduler = scheduler
+        self.alpha = alpha  # Weighting factor for contrastive loss
+        self.writer = writer  # TensorBoard writer
+        self.training_losses = []
+        self.test_losses = []
+        self.batch_size = batch_size or 32
+        self.device = next(model.parameters()).device  # Device (CPU or GPU)
+
+    def create_pairs(self, data, labels):
+        # Generate positive and negative pairs
+        pairs = []
+        pair_labels = []
+        for i in range(len(data)):
+            current_data = data[i]
+            current_label = labels[i]
+
+            # Positive pair
+            positive_idx = random.choice([idx for idx, lbl in enumerate(labels) if lbl == current_label and idx != i])
+            positive_data = data[positive_idx]
+            pairs.append((current_data, positive_data))
+            pair_labels.append(1)  # Label 1 for positive pairs
+
+            # Negative pair
+            negative_idx = random.choice([idx for idx, lbl in enumerate(labels) if lbl != current_label])
+            negative_data = data[negative_idx]
+            pairs.append((current_data, negative_data))
+            pair_labels.append(0)  # Label 0 for negative pairs
+        
+        return pairs, pair_labels
+
+    def train(self, train_loader, test_loader=None, epochs=1):
+        epoch_bar = tqdm(range(epochs), desc='Training Progress')
+        for epoch in epoch_bar:
+            self.model.train()
+            epoch_reconstruction_losses = []
+            epoch_contrastive_losses = []
+            epoch_combined_losses = []
+
+            # Create pairs and labels for contrastive learning
+            for data, labels in train_loader:
+                pairs, pair_labels = self.create_pairs(data, labels)
+                pair_data = TensorDataset(
+                    torch.stack([p[0] for p in pairs]), 
+                    torch.stack([p[1] for p in pairs]), 
+                    torch.tensor(pair_labels)
+                )
+                pair_loader = DataLoader(pair_data, batch_size=self.batch_size, shuffle=True)
+
+                # Training loop for pairwise data
+                batch_bar = tqdm(pair_loader, desc=f'Epoch {epoch + 1}/{epochs}', leave=False)
+                for data1, data2, labels in batch_bar:
+                    data1 = data1.view(data1.size(0), -1).to(self.device)
+                    data2 = data2.view(data2.size(0), -1).to(self.device)
+                    labels = labels.to(self.device)
+
+                    # Forward pass
+                    # latent1 = self.model.encoder(data1)
+                    # latent2 = self.model.encoder(data2)
+                    # output1 = self.model.decoder(latent1)
+                    # output2 = self.model.decoder(latent2)
+
+                    latent1, output1 = self.model(data1)
+                    latent2, output2 = self.model(data2)
+
+                    # Reconstruction loss
+                    reconstruction_loss = self.criterion(output1, data1) + self.criterion(output2, data2)
+                    
+                    # Contrastive loss
+                    contrastive_loss = ContrastiveLoss(margin=1.0)(latent1, latent2, labels)
+
+                    # Total loss
+                    loss = reconstruction_loss + self.alpha * contrastive_loss
+
+                    self.optimizer.zero_grad()
+                    loss.backward()
+                    self.optimizer.step()
+
+                    epoch_reconstruction_losses.append(reconstruction_loss.item())
+                    epoch_contrastive_losses.append(contrastive_loss.item())
+                    epoch_combined_losses.append(loss.item())
+                    batch_bar.set_postfix(loss=loss.item())
+
+            if self.scheduler:
+                self.scheduler.step()
+
+            # Log average losses
+            avg_reconstruction_loss = sum(epoch_reconstruction_losses) / len(epoch_reconstruction_losses)
+            avg_contrastive_loss = sum(epoch_contrastive_losses) / len(epoch_contrastive_losses)
+            avg_combined_loss = sum(epoch_combined_losses) / len(epoch_combined_losses)
+            self.training_losses.append(avg_combined_loss)
+            print(f"Epoch {epoch + 1}/{epochs} - Reconstruction Loss: {avg_reconstruction_loss:.4f}, Contrastive Loss: {avg_contrastive_loss:.4f}, Combined Loss: {avg_combined_loss:.4f}")
+
+            # if self.writer is not None:
+            #     self.writer.add_scalar('Loss/Combined/Training', avg_combined_loss, epoch + 1)
+            #     self.writer.add_scalar('Loss/Reconstruction/Training', avg_reconstruction_loss, epoch + 1)
+            #     self.writer.add_scalar('Loss/Contrastive/Training', avg_contrastive_loss, epoch + 1)
+
+            # # Evaluate on test set if available
+            # if test_loader:
+            #     test_reconstruction_loss, test_contrastive_loss, test_combined_loss = self.test(test_loader)
+            #     self.test_losses.append(test_combined_loss)
+            #     if self.writer is not None:
+            #         self.writer.add_scalar('Loss/Combined/Test', test_combined_loss, epoch + 1)
+            #         self.writer.add_scalar('Loss/Reconstruction/Test', test_reconstruction_loss, epoch + 1)
+            #         self.writer.add_scalar('Loss/Contrastive/Test', test_contrastive_loss, epoch + 1)
+
+            if test_loader:
+                test_reconstruction_loss, test_contrastive_loss, test_combined_loss = self.test(test_loader)
+                self.test_losses.append(test_combined_loss)
+
+            if self.writer is not None:
+                # Log both training and test loss for combined, reconstruction, and contrastive losses
+                self.writer.add_scalars('Loss/Combined', {
+                    'Training': avg_combined_loss,
+                    'Test': test_combined_loss if test_loader else None
+                }, epoch + 1)
+                
+                self.writer.add_scalars('Loss/Reconstruction', {
+                    'Training': avg_reconstruction_loss,
+                    'Test': test_reconstruction_loss if test_loader else None
+                }, epoch + 1)
+                
+                self.writer.add_scalars('Loss/Contrastive', {
+                    'Training': avg_contrastive_loss,
+                    'Test': test_contrastive_loss if test_loader else None
+                }, epoch + 1)
+                
+                for name, param in model.named_parameters():
+                    if "weight" in name:
+                        # Normalize weights for visualization
+                        weight_matrix = param.data.cpu().numpy()
+                        weight_matrix = (weight_matrix - weight_matrix.min()) / (weight_matrix.max() - weight_matrix.min())
+                        
+                        # Convert to a 3-channel grayscale image
+                        weight_image = torch.tensor(weight_matrix).unsqueeze(0)  # Shape: [1, H, W]
+                        weight_image = transforms.ToPILImage()(weight_image)  # Convert to PIL image
+
+                        # Add to TensorBoard
+                        self.writer.add_image(f"Weights/{name}", transforms.ToTensor()(weight_image), epoch)
+
+    def test(self, test_loader):
+        self.model.eval()
+        total_reconstruction_loss = 0
+        total_contrastive_loss = 0
+        total_combined_loss = 0
+        with torch.no_grad():
+            for data, labels in test_loader:
+                pairs, pair_labels = self.create_pairs(data, labels)
+                pair_data = TensorDataset(
+                    torch.stack([p[0] for p in pairs]), 
+                    torch.stack([p[1] for p in pairs]), 
+                    torch.tensor(pair_labels)
+                )
+                pair_loader = DataLoader(pair_data, batch_size=32, shuffle=False)
+
+                for data1, data2, labels in pair_loader:
+                    data1 = data1.view(data1.size(0), -1).to(self.device)
+                    data2 = data2.view(data2.size(0), -1).to(self.device)
+                    labels = labels.to(self.device)
+
+                    latent1 = self.model.encoder(data1)
+                    latent2 = self.model.encoder(data2)
+                    output1 = self.model.decoder(latent1)
+                    output2 = self.model.decoder(latent2)
+
+                    # Reconstruction and contrastive losses
+                    reconstruction_loss = self.criterion(output1, data1) + self.criterion(output2, data2)
+                    contrastive_loss = ContrastiveLoss(margin=1.0)(latent1, latent2, labels)
+                    loss = reconstruction_loss + self.alpha * contrastive_loss
+
+                    total_reconstruction_loss += reconstruction_loss.item()
+                    total_contrastive_loss += contrastive_loss.item()
+                    total_combined_loss += loss.item()
+
+        avg_reconstruction_loss = total_reconstruction_loss / len(test_loader)
+        avg_contrastive_loss = total_contrastive_loss / len(test_loader)
+        avg_combined_loss = total_combined_loss / len(test_loader)
+        return avg_reconstruction_loss, avg_contrastive_loss, avg_combined_loss
+
 #%%
 # NGTrainer Class Definition
 class NGTrainer:
     def __init__(self, model, train_dataset, test_dataset, writer, pretrained_classes=None, new_classes=None,
                  batch_size=None, lr=None, lr_factor=None, epochs=None, epochs_per_iteration=None,
-                 thresholds=None, max_nodes=None, max_outliers=None, criterion=None, criterion_classification=None, factor_thr=None, factor_ng=None, metric_threshould=None, alpha=None):
+                 thresholds=None, max_nodes=None, max_outliers=None, criterion=None, criterion_classification=None, factor_thr=None, factor_ng=None, metric_threshould=None, alpha=None, weight_decay=None):
         """
         Initializes the NGTrainer with the given parameters.
         """
@@ -746,6 +1034,7 @@ class NGTrainer:
         self.metric_threshould = metric_threshould or 'max'
         self.thresholds = thresholds
         self.writer = writer
+        self.weight_decay = weight_decay or 10e-5
         # Initialize datasets
         self.init_datasets()
         self.alpha = alpha or 1
@@ -776,20 +1065,21 @@ class NGTrainer:
 
     def init_optimizer_scheduler(self):
         # Initialize optimizer for pretraining
-        self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=1e-2)
-        self.scheduler = ExponentialLR(self.optimizer, gamma=0.95)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        self.scheduler = ExponentialLR(self.optimizer, gamma=1)
 
     def pretrain_model(self):
         """
         Pretrains the model on the specified pretrained classes.
         """
         print("Starting pretraining...")
-        trainer = Trainer(self.model, self.criterion, self.optimizer, self.scheduler)
+        trainer = Trainer(self.model, self.criterion, self.optimizer, self.scheduler, pretrained_classes=self.pretrained_classes, get_samples_and_reconstructions=self.get_samples_and_reconstructions, log_samples_to_tensorboard=self.log_samples_to_tensorboard)
         trainer.train(self.train_loader_pretrained, self.test_loader_pretrained, epochs=self.epochs)
         self.training_losses.extend(trainer.training_losses)
         self.test_losses.extend(trainer.test_losses)
         loss_stats = self._compute_losses_per_layer_per_class(self.test_loader_pretrained)
         self.thresholds = self._get_thresholds_from_statistics_range(loss_stats=loss_stats, factor=self.factor_thr, metric=self.metric_threshould)
+        self.model.remove_all_dropout()
         print("Pretraining completed.")
 
     def pretrain_model_clustered(self, alpha=1.0, cluster_update_interval=1):
@@ -832,7 +1122,7 @@ class NGTrainer:
         print("Starting pretraining with classification...")
         self.model.classification = True
         # Initialize the trainer with both reconstruction and classification criteria
-        trainer = TrainerWithClassification(
+        trainer = ClassificationTrainer(
             model=self.model,
             recon_criterion=self.criterion,
             class_criterion=self.criterion_classification,
@@ -840,7 +1130,7 @@ class NGTrainer:
             scheduler=self.scheduler,
             alpha=self.alpha,  # Weighting factor for classification loss
             classes_pretraining=self.pretrained_classes
-        )
+            )
         
         # Start training
         trainer.train(
@@ -863,6 +1153,38 @@ class NGTrainer:
         )
         self.model.classification = False
         print("Pretraining with classification completed.")
+
+    def pretrain_model_contrastive(self):
+        """
+        Pretrains the model with contrastive learning on the specified pretrained classes.
+        """
+        print("Starting pretraining with contrastive learning...")
+        self.model.return_encoded = True
+        trainer = ContrastTrainer(
+            model=self.model,
+            criterion=self.criterion,
+            optimizer=self.optimizer,
+            scheduler=self.scheduler,
+            alpha=self.alpha,
+            batch_size=self.batch_size,
+            writer=self.writer
+        )
+        trainer.train(
+            train_loader=self.train_loader_pretrained,
+            test_loader=self.test_loader_pretrained,
+            epochs=self.epochs
+        )
+        self.training_losses.extend(trainer.training_losses)
+        self.test_losses.extend(trainer.test_losses)
+
+        self.model.return_encoded = False
+        loss_stats = self._compute_losses_per_layer_per_class(self.test_loader_pretrained)
+        self.thresholds = self._get_thresholds_from_statistics_range(
+            loss_stats=loss_stats,
+            factor=self.factor_thr,
+            metric=self.metric_threshould
+        )
+        print("Pretraining with contrastive learning completed.")
 
     def apply_neurogenesis(self):
         """
@@ -1081,7 +1403,7 @@ class NGTrainer:
                         self.losses_per_layer_history.append(losses_per_layer)
                         clear_output(wait=True)
                         # self._plot_layer_sizes_and_losses(title=f'After Plasticity Phase {e + 1} - Level {level + 1} next level - Class {_class}')
-                        print('new log incomming...')
+                        # print('new log incomming...')
                         self.log_custom_metrics(itt_overall)
                         itt_overall += 0.5
 
@@ -1090,7 +1412,7 @@ class NGTrainer:
                         self.losses_per_layer_history.append(losses_per_layer)
                         clear_output(wait=True)
                         # self._plot_layer_sizes_and_losses(title=f'After Stability Phase {e + 1} - Level {level + 1} next level - Class {_class}')
-                        print('new log incomming...')
+                        # print('new log incomming...')
                         self.log_custom_metrics(itt_overall)
                     self.model.unfreeze_layers(self.model.encoder_layers + self.model.decoder_layers)
                     self.neruons_per_new_class[str(_class)] = model.hidden_sizes
@@ -1319,7 +1641,7 @@ class NGTrainer:
         else:
             print("Layer size history is not available or empty.")# Training Utilities
 
-    def get_samples_and_reconstructions(self, class_label, n):
+    def get_samples_and_reconstructions(self, class_label, n, synthetic=True):
         """
         Retrieves n examples of the specified class, their reconstructions from the autoencoder,
         and n synthetic samples from intrinsic replay (if available).
@@ -1362,19 +1684,19 @@ class NGTrainer:
 
                 original_images.extend(data.view(-1, 1, 28, 28).cpu())
                 reconstructed_images.extend(output.cpu())
+        if synthetic:
+            # Get synthetic images from intrinsic replay if available  
+            _new_data_loader, _stability_loader, synthetic_dataset = self._create_data_loaders(n=n)
+            # Filter synthetic dataset for the specified class
+            synthetic_class_indices = [i for i, label in enumerate(synthetic_dataset.labels) if label == class_label]
+            if synthetic_class_indices:
+                synthetic_class_indices = synthetic_class_indices[:n]
+                synthetic_subset = Subset(synthetic_dataset, synthetic_class_indices)
+                synthetic_loader = DataLoader(synthetic_subset, batch_size=n, shuffle=False)
 
-        # Get synthetic images from intrinsic replay if available  
-        _new_data_loader, _stability_loader, synthetic_dataset = self._create_data_loaders(n=n)
-        # Filter synthetic dataset for the specified class
-        synthetic_class_indices = [i for i, label in enumerate(synthetic_dataset.labels) if label == class_label]
-        if synthetic_class_indices:
-            synthetic_class_indices = synthetic_class_indices[:n]
-            synthetic_subset = Subset(synthetic_dataset, synthetic_class_indices)
-            synthetic_loader = DataLoader(synthetic_subset, batch_size=n, shuffle=False)
-
-            for data, _ in synthetic_loader:
-                data = data.view(-1, 1, 28, 28)
-                synthetic_images.extend(data.cpu())
+                for data, _ in synthetic_loader:
+                    data = data.view(-1, 1, 28, 28)
+                    synthetic_images.extend(data.cpu())
         else:
             print(f"No synthetic samples found for class {class_label} in the intrinsic replay dataset.")
 
@@ -1448,6 +1770,8 @@ class NGTrainer:
             self.writer.add_image(f'Class_{class_label}/Intrinsic_Replay', synthetic_grid, global_step=step)
 
 
+# %%
+
 #%%
 # Main Execution Script
 if __name__ == "__main__":
@@ -1459,7 +1783,7 @@ if __name__ == "__main__":
 
     # Data transformations
     transform = transforms.Compose([
-        transforms.RandomRotation(degrees=(-20, 20)),
+        #transforms.RandomRotation(degrees=(-180, 180)),
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,))
     ])
@@ -1469,13 +1793,14 @@ if __name__ == "__main__":
     full_test_dataset = datasets.MNIST(root='./data', train=False, download=True, transform=transform)
 
     # Specify classes for pretraining and neurogenesis
-    pretrained_classes = [1, 7]
+    pretrained_classes = [2,7]
     new_classes = [0,2,3,4,5,6,8,9]
     batch_size = 64
-    act_func=nn.Sigmoid()
+    #act_func=nn.Sigmoid()
+    act_func=nn.LeakyReLU()
 
-    # Initialize the model
-    model = NGAutoencoder(input_dim=28*28, hidden_sizes=[200, 200, 75, 20], act_func=act_func, num_classes_pretraining=len(pretrained_classes), classification_size=10)
+    # Initialize the model [200, 200, 75, 20]
+    model = NGAutoencoder(input_dim=28*28, hidden_sizes=[200, 200, 75, 20], act_func=act_func, num_classes_pretraining=len(pretrained_classes), dropout=0.5)
 
     # Initialize the NGTrainer
     ng_trainer = NGTrainer(model=model,
@@ -1487,17 +1812,18 @@ if __name__ == "__main__":
                            batch_size=batch_size,
                            lr=1e-3,
                            lr_factor=1e-2,
-                           epochs=25,
+                           epochs=11,
                            epochs_per_iteration=5,
                            max_nodes=[1500, 800, 500, 200],
                            max_outliers=5,
-                           factor_thr=1.4,
+                           factor_thr=1,
                            factor_ng=1e-2,
                            metric_threshould='max',
-                           alpha = 100)
+                           alpha = 1
+    )
 
     # Pretrain the model
-    ng_trainer.pretrain_model_classification()
+    ng_trainer.pretrain_model()
 
     # Apply neurogenesis
     layergroth = ng_trainer.apply_neurogenesis()
