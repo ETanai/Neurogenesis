@@ -1813,7 +1813,7 @@ if __name__ == "__main__":
                            lr=1e-3,
                            lr_factor=1e-2,
                            epochs=11,
-                           epochs_per_iteration=5,
+                           epochs_per_iteration=4,
                            max_nodes=[1500, 800, 500, 200],
                            max_outliers=5,
                            factor_thr=1,
