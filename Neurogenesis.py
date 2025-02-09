@@ -20,6 +20,11 @@ from datetime import datetime
 import torchvision.utils
 from sklearn.cluster import KMeans
 import random
+from scipy.stats import ks_2samp, ttest_ind
+from sklearn.metrics.pairwise import cosine_similarity, euclidean_distances
+from sklearn.decomposition import PCA
+import seaborn as sns
+
 from torch.utils.tensorboard import SummaryWriter
 #%%
 # custom losses
@@ -115,7 +120,6 @@ class NGAutoencoder(nn.Module):
             nn.Linear(self.classification_size, self.num_classes_pretraining)
         )
         return classifier
-    
 
     def get_layer_sizes(self):
         sizes = []
@@ -124,7 +128,7 @@ class NGAutoencoder(nn.Module):
                 sizes.append({'in_features': layer.in_features, 'out_features': layer.out_features})
         return sizes
 
-    def forward(self, x, l=None):
+    def forward(self, x, l=None, noise_latent=0):
         # If l is None, use the full network
         if l is None:
             l = len(self.encoder_layers)
@@ -134,17 +138,30 @@ class NGAutoencoder(nn.Module):
                 l = len(self.encoder_layers)
         # Encode with first l layers
         encoded = x
-        for layer in self.encoder_layers[:l]:
+        for i, layer in enumerate(self.encoder_layers[:l]):
             encoded = layer(encoded)
             if self.act_func is not None:
-                encoded = self.act_func(encoded)
+                if (i+1) == len(self.encoder_layers[:l]):
+                    # act_func = nn.Sigmoid()
+                    # act_func = self.act_func
+                    act_func = nn.Identity()
+                else:
+                    act_func = self.act_func
+                encoded = act_func(encoded)
+        # add noise to encoded
+        encoded = encoded + torch.rand_like(encoded) * noise_latent
         # Decode with corresponding layers
         decoder_start_idx = len(self.decoder_layers) - l
         decoded = encoded
-        for layer in self.decoder_layers[decoder_start_idx:]:
+        for i, layer in enumerate(self.decoder_layers[decoder_start_idx:]):
             decoded = layer(decoded)
             if self.act_func is not None:
-                decoded = self.act_func(decoded)
+                if (i+1) == len(self.decoder_layers[decoder_start_idx:]):
+                    act_func = nn.Sigmoid()
+                    # act_func = self.act_func
+                else:
+                    act_func = self.act_func
+                decoded = act_func(decoded)
         if self.return_encoded: return encoded, decoded
         elif self.classification:
             class_logits = self.classifier(encoded)
@@ -381,7 +398,7 @@ class SyntheticMNIST(Dataset):
         return self.data[idx], self.labels[idx]
 
 # Function to compute class statistics with Cholesky decomposition
-def get_class_stats_with_cholesky(encoder, data_loader):
+def get_class_stats_with_cholesky(encoder, data_loader, debug=False):
     encoder.eval()
     class_predictions = {}
 
@@ -400,9 +417,9 @@ def get_class_stats_with_cholesky(encoder, data_loader):
         predictions = np.stack(predictions)
         mean = np.mean(predictions, axis=0)
         # Calculate the covariance matrix
-        epsilon = 1e-6  # Small jitter value
+        epsilon = 1e-5  # Small jitter value
         cov_matrix = np.cov(predictions, rowvar=False)
-        cov_matrix += epsilon * np.eye(cov_matrix.shape[0])  # Add jitter to diagonal, to increace probability of poditive definte matrix
+        # cov_matrix += epsilon * np.eye(cov_matrix.shape[0])  # Add jitter to diagonal, to increace probability of poditive definte matrix
         # Cholesky decomposition of the covariance matrix
         try:
             chol_cov = np.linalg.cholesky(cov_matrix)
@@ -411,7 +428,8 @@ def get_class_stats_with_cholesky(encoder, data_loader):
             cov_matrix += np.eye(cov_matrix.shape[0]) * 1e-6
             chol_cov = np.linalg.cholesky(cov_matrix)
         class_stats[label] = {'mean': mean, 'cholesky': chol_cov}
-    return class_stats
+    if debug: return class_stats, cov_matrix
+    else: return class_stats
 
 # Function to sample from class statistics using Cholesky factor
 def sample_from_stats_cholesky(class_stats, num_samples_per_class):
@@ -441,11 +459,73 @@ def create_synthetic_dataset(encoder, decoder, data_loader, num_samples_per_clas
         for label, samples in sampled_data.items():
             samples = torch.tensor(samples).float()
             images = decoder(samples)
+            images = images * 0.3081 + 0.1307
+            # images = images.clamp(0, 1)
             images = images.view(-1, 1, 28, 28)  # Adjust based on your data shape
             synthetic_images.extend(images)
             synthetic_labels.extend([label] * len(images))
     synthetic_dataset = SyntheticMNIST(synthetic_images, synthetic_labels)
     return synthetic_dataset
+
+
+def test_distribution():
+
+    data_loader = ng_trainer.train_loader_pretrained
+    class_stats, cov_matrix = get_class_stats_with_cholesky(model, data_loader, debug=True)
+    sampled_data = sample_from_stats_cholesky(class_stats, 6265)
+    latent_rep = []
+    model = ng_trainer.model.encoder
+    batch_bar = tqdm(data_loader, desc=f'Epoch 0', leave=False)
+    for data, _ in batch_bar:
+        data = data.view(data.size(0), -1)  # Flatten the images
+        output = model(data)
+        latent_rep.extend(output)
+    latent_rep = np.array([t.detach().numpy() for t in latent_rep])
+    # Assuming latent_rep1 and latent_rep2 are your arrays
+    mean1 = latent_rep.mean()
+    mean2 = sampled_data[7].mean()
+    std1 = latent_rep.std()
+    std2 = sampled_data[7].std()
+
+    print("Mean difference:", mean1 - mean2)
+    print("Std difference:", std1 - std2)
+
+    for i in range(latent_rep.shape[1]):  # Iterate over dimensions
+        ks_stat, ks_pval = ks_2samp(latent_rep[:, i], sampled_data[7][:, i])
+        t_stat, t_pval = ttest_ind(latent_rep[:, i], sampled_data[7][:, i])
+        print(f"Dimension {i+1}: KS p-value = {ks_pval}, T-test p-value = {t_pval}")
+
+    # Compute cosine similarity between the means
+    cosine_sim = cosine_similarity(mean1.reshape(1, -1), mean2.reshape(1, -1))
+    print("Cosine similarity between means:", cosine_sim[0, 0])
+
+    # Compute Euclidean distance between the means
+    euclidean_dist = np.linalg.norm(mean1 - mean2)
+    print("Euclidean distance between means:", euclidean_dist)
+
+    for i in range(latent_rep.shape[1]):  # For each dimension
+        plt.figure()
+        plt.hist(latent_rep[:, i], bins=30, alpha=0.5, label='Set 1')
+        plt.hist(sampled_data[7][:, i], bins=30, alpha=0.5, label='Set 2')
+        plt.title(f"Dimension {i+1}")
+        plt.legend()
+        plt.show()
+
+    # Combine the two datasets with labels
+    combined = np.vstack([latent_rep, sampled_data[7]])
+    labels = np.array([0] * len(latent_rep) + [1] * len(sampled_data[7]))
+
+    # Apply PCA
+    pca = PCA(n_components=2)
+    reduced = pca.fit_transform(combined)
+
+    # Visualize
+    df = pd.DataFrame(reduced, columns=["PC1", "PC2"])
+    df['Label'] = labels
+    sns.scatterplot(data=df, x="PC1", y="PC2", hue="Label", palette="Set1")
+    plt.title("PCA Projection")
+    plt.show()
+
 
 #%%
 # Training Utilities
@@ -462,7 +542,7 @@ class Trainer:
         self.get_samples_and_reconstructions = get_samples_and_reconstructions
         self.log_samples_to_tensorboard = log_samples_to_tensorboard
 
-    def train(self, train_loader, test_loader=None, epochs=1):
+    def train(self, train_loader, test_loader=None, epochs=1, noise_latent=0):
         epoch_bar = tqdm(range(epochs), desc='Training Progress')
         for epoch in epoch_bar:
             self.model.train()
@@ -470,7 +550,7 @@ class Trainer:
             batch_bar = tqdm(train_loader, desc=f'Epoch {epoch + 1}/{epochs}', leave=False)
             for data, _ in batch_bar:
                 data = data.view(data.size(0), -1)  # Flatten the images
-                output = self.model(data)
+                output = self.model(data, noise_latent=noise_latent)
                 loss = self.criterion(output, data)
 
                 self.optimizer.zero_grad()
@@ -1010,7 +1090,7 @@ class ContrastTrainer:
 class NGTrainer:
     def __init__(self, model, train_dataset, test_dataset, writer, pretrained_classes=None, new_classes=None,
                  batch_size=None, lr=None, lr_factor=None, epochs=None, epochs_per_iteration=None,
-                 thresholds=None, max_nodes=None, max_outliers=None, criterion=None, criterion_classification=None, factor_thr=None, factor_ng=None, metric_threshould=None, alpha=None, weight_decay=None):
+                 thresholds=None, max_nodes=None, max_outliers=None, criterion=None, criterion_classification=None, factor_thr=None, factor_ng=None, metric_threshould=None, alpha=None, weight_decay=None, latent_noise=None):
         """
         Initializes the NGTrainer with the given parameters.
         """
@@ -1038,6 +1118,7 @@ class NGTrainer:
         # Initialize datasets
         self.init_datasets()
         self.alpha = alpha or 1
+        self.latent_noise = latent_noise or 0
 
 
         # Initialize optimizer and scheduler
@@ -1068,13 +1149,13 @@ class NGTrainer:
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         self.scheduler = ExponentialLR(self.optimizer, gamma=1)
 
-    def pretrain_model(self):
+    def pretrain_model(self, noise_latent=0):
         """
         Pretrains the model on the specified pretrained classes.
         """
         print("Starting pretraining...")
         trainer = Trainer(self.model, self.criterion, self.optimizer, self.scheduler, pretrained_classes=self.pretrained_classes, get_samples_and_reconstructions=self.get_samples_and_reconstructions, log_samples_to_tensorboard=self.log_samples_to_tensorboard)
-        trainer.train(self.train_loader_pretrained, self.test_loader_pretrained, epochs=self.epochs)
+        trainer.train(self.train_loader_pretrained, self.test_loader_pretrained, epochs=self.epochs, noise_latent=noise_latent)
         self.training_losses.extend(trainer.training_losses)
         self.test_losses.extend(trainer.test_losses)
         loss_stats = self._compute_losses_per_layer_per_class(self.test_loader_pretrained)
@@ -1769,6 +1850,24 @@ class NGTrainer:
             synthetic_grid = torchvision.utils.make_grid(synthetic_images, nrow=5, normalize=True)
             self.writer.add_image(f'Class_{class_label}/Intrinsic_Replay', synthetic_grid, global_step=step)
 
+    def log_all_class_samples_to_tensorboard(self, n=5, global_step=0):
+        """
+        Retrieves n samples for each trained class (both pretrained and new classes), obtains their 
+        reconstructions and intrinsic replay reconstructions from the current model, and logs them to TensorBoard.
+        
+        Args:
+            n (int): Number of samples to retrieve per class.
+            global_step (int): The current training step or epoch (used as the TensorBoard global step).
+        """
+        # Log for pretrained classes
+        for class_label in self.pretrained_classes:
+            original_imgs, reconstructed_imgs, synthetic_imgs = self.get_samples_and_reconstructions(class_label, n, synthetic=True)
+            self.log_samples_to_tensorboard(original_imgs, reconstructed_imgs, synthetic_imgs, class_label, global_step)
+        
+        # Optionally, log for new classes if you want to monitor them too.
+        for class_label in self.new_classes:
+            original_imgs, reconstructed_imgs, synthetic_imgs = self.get_samples_and_reconstructions(class_label, n, synthetic=True)
+            self.log_samples_to_tensorboard(original_imgs, reconstructed_imgs, synthetic_imgs, class_label, global_step)
 
 # %%
 
@@ -1794,10 +1893,11 @@ if __name__ == "__main__":
 
     # Specify classes for pretraining and neurogenesis
     pretrained_classes = [2,7]
-    new_classes = [0,2,3,4,5,6,8,9]
+    new_classes = [0,1,3,4,5,6,8,9]
     batch_size = 64
-    #act_func=nn.Sigmoid()
+    # act_func=nn.Sigmoid()
     act_func=nn.LeakyReLU()
+    # act_func=nn.Tanh()
 
     # Initialize the model [200, 200, 75, 20]
     model = NGAutoencoder(input_dim=28*28, hidden_sizes=[200, 200, 75, 20], act_func=act_func, num_classes_pretraining=len(pretrained_classes), dropout=0.5)
@@ -1812,21 +1912,23 @@ if __name__ == "__main__":
                            batch_size=batch_size,
                            lr=1e-3,
                            lr_factor=1e-2,
-                           epochs=11,
+                           epochs=20,
                            epochs_per_iteration=4,
                            max_nodes=[1500, 800, 500, 200],
-                           max_outliers=5,
-                           factor_thr=1,
+                           max_outliers=0,
+                           factor_thr=0.5,
                            factor_ng=1e-2,
                            metric_threshould='max',
-                           alpha = 1
+                           alpha = 0.1
     )
 
     # Pretrain the model
-    ng_trainer.pretrain_model()
+    ng_trainer.pretrain_model(noise_latent=9)
+    ng_trainer.log_all_class_samples_to_tensorboard()
 
     # Apply neurogenesis
     layergroth = ng_trainer.apply_neurogenesis()
+
 
     # Plot metrics
     ng_trainer.plot_metrics()
