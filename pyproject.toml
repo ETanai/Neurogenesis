@@ -1,0 +1,18 @@
+[project]
+name = "mnist_autoencoder"
+version = "0.1.0"
+dependencies = [
+  "torch>=2.2",
+  "torchvision",
+  "pytorch-lightning>=2.2",
+  "hydra-core",
+  "tensorboard"
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-select = ["I"]   # isort-style import ordering
+
+[tool.ruff.format]
+docstring-code-format = true
