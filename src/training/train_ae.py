@@ -1,17 +1,14 @@
-import tempfile
-
 import hydra
 import pytorch_lightning as pl
 import torchvision
 from hydra.utils import instantiate
 from omegaconf import DictConfig
-from PIL import Image
 from pytorch_lightning.loggers import MLFlowLogger, TensorBoardLogger
 from torch import cat, nn, optim
 
 from data.mnist_datamodule import MNISTDataModule
 from models.autoencoder import AutoEncoder
-from utils.intrinsic_replay import IntrinsicReplay  # << your helper from before
+from .intrinsic_replay_runner import run_intrinsic_replay
 
 
 @hydra.main(version_base=None, config_path="../../config", config_name="config")
@@ -79,37 +76,14 @@ def main(cfg: DictConfig) -> None:
 
     # 5) optional intrinsic‐replay
     if cfg.ir.enabled:
-        # a) build IR on train set
-        ir = IntrinsicReplay(
-            encoder=model.encoder, decoder=model.decoder, device=trainer.strategy.root_device
+        run_intrinsic_replay(
+            encoder=model.encoder,
+            decoder=model.decoder,
+            dataloader=dm.train_dataloader(),
+            mlf_logger=mlf_logger,
+            n_samples_per_class=cfg.ir.n_samples_per_class,
+            device=trainer.strategy.root_device,
         )
-        ir.fit(dm.train_dataloader())
-
-        # b) for each class, sample & log
-        mlflow_client = mlf_logger.experiment
-        run_id = mlf_logger.run_id
-
-        for cls, stats in ir.stats.items():
-            # sample a small grid of n x n
-            n = cfg.ir.n_samples_per_class
-            imgs = ir.sample_image_tensors(cls, n, view_shape=(1, 28, 28))
-            grid = torchvision.utils.make_grid(imgs, nrow=int(n**0.5))
-
-            # convert to uint8 PIL
-            np_img = (grid.permute(1, 2, 0).cpu().numpy() * 255).astype("uint8")
-            pil_img = Image.fromarray(np_img)
-
-            # write out & log as artifact
-            with tempfile.TemporaryDirectory() as td:
-                path = f"{td}/ir_class_{cls}.png"
-                pil_img.save(path)
-                mlflow_client.log_artifact(
-                    run_id=run_id,
-                    artifact_path=f"ir_replay/class_{cls}",
-                    local_path=path,
-                )
-
-        print(f"✅ intrinsic‐replay artifacts logged under run {run_id}")
 
 
 if __name__ == "__main__":
