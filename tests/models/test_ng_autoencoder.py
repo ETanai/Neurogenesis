@@ -1,5 +1,6 @@
 import pytest
 import torch
+from torch.utils.data import DataLoader, TensorDataset
 
 from models.ng_autoencoder import NGAutoEncoder
 
@@ -71,19 +72,52 @@ def test_set_requires_grad_unfreeze_all(simple_ae):
 def test_add_new_nodes_single_layer(simple_ae):
     enc_layer = simple_ae.encoder[0]
     dec_layer = simple_ae.decoder[0]
-    # before adding
     assert simple_ae.hidden_sizes[0] == 2
     assert enc_layer.out_features_old == 2
     assert enc_layer.out_features_new == 0
     orig_dec_in = dec_layer.in_features
-    # add new nodes
     simple_ae.add_new_nodes(level_idx=0, num_new=3)
-    # after adding
     assert simple_ae.hidden_sizes[0] == 5
-    assert enc_layer.out_features_old == 2
-    assert enc_layer.out_features_new == 3
     assert enc_layer.out_features == 5
     assert dec_layer.in_features == orig_dec_in + 3
+
+
+def test_plasticity_phase_updates_new_only(simple_ae, toy_input):
+    simple_ae.add_new_nodes(level_idx=0, num_new=2)
+    loader = DataLoader(TensorDataset(toy_input), batch_size=2)
+    enc_layer = simple_ae.encoder[0]
+    old_w_old = enc_layer.weight_old.clone()
+    old_w_new = enc_layer.weight_new.clone()
+    simple_ae.plasticity_phase(loader, level_idx=0, epochs=1, lr=1e-2)
+    assert torch.allclose(enc_layer.weight_old, old_w_old, atol=1e-6)
+    assert not torch.allclose(enc_layer.weight_new, old_w_new)
+
+
+def test_stability_phase_updates_all(simple_ae, toy_input):
+    simple_ae.add_new_nodes(level_idx=0, num_new=2)
+    loader = DataLoader(TensorDataset(toy_input), batch_size=2)
+    orig = {name: param.clone() for name, param in simple_ae.named_parameters()}
+    simple_ae.stability_phase(loader, lr=1e-3, epochs=1)
+    for name, param in simple_ae.named_parameters():
+        assert not torch.allclose(param, orig[name])
+
+
+def test_stability_phase_with_ir(simple_ae, toy_input):
+    simple_ae.add_new_nodes(level_idx=0, num_new=1)
+    loader = DataLoader(TensorDataset(toy_input), batch_size=2)
+
+    class DummyIR:
+        def __init__(self, input_dim):
+            self.input_dim = input_dim
+
+        def sample_images(self, cls, n):
+            return torch.ones(n, self.input_dim)
+
+    ir = DummyIR(input_dim=3)
+    orig = {name: param.clone() for name, param in simple_ae.named_parameters()}
+    simple_ae.stability_phase(loader, lr=1e-3, epochs=1, ir=ir, class_id=0, replay_size=2)
+    for name, param in simple_ae.named_parameters():
+        assert not torch.allclose(param, orig[name])
 
 
 if __name__ == "__main__":

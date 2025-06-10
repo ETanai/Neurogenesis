@@ -1,12 +1,13 @@
 from functools import partial
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, TensorDataset
 
 from models.ng_linear import NGLinear  # <-- your custom layer
+from utils.intrinsic_replay import IntrinsicReplay  # IR utility
 
 _ACTS: dict[str, type[nn.Module]] = {
     "relu": nn.ReLU,
@@ -18,7 +19,7 @@ _ACTS: dict[str, type[nn.Module]] = {
 
 
 class NGAutoEncoder(nn.Module):
-    """Auto‐encoder built with NGLinear (no new nodes by default)."""
+    """Auto‐encoder built with NGLinear (neurogenesis-enabled)."""
 
     def __init__(
         self,
@@ -36,7 +37,6 @@ class NGAutoEncoder(nn.Module):
         act_cls = _ACTS[activation]
         act_last_cls = _ACTS[activation_last]
 
-        # encoder modules
         enc_layers: list[nn.Module] = []
         prev_dim = input_dim
         for h in self.hidden_sizes:
@@ -45,7 +45,6 @@ class NGAutoEncoder(nn.Module):
             prev_dim = h
         self.encoder = nn.Sequential(*enc_layers)
 
-        # decoder modules (mirror)
         dec_layers: list[nn.Module] = []
         prev_dim = self.hidden_sizes[-1]
         for h in reversed(self.hidden_sizes[:-1]):
@@ -127,7 +126,12 @@ class NGAutoEncoder(nn.Module):
         params = [p for p in self.parameters() if p.requires_grad]
         optimizer = torch.optim.Adam(params, lr=lr)
         for _ in range(epochs):
-            for x in data_loader:
+            for batch in data_loader:
+                # unpack the batch tuple
+                if isinstance(batch, (list, tuple)):
+                    x = batch[0]
+                else:
+                    x = batch
                 x = x.to(device)
                 x_hat = self.forward_partial(x, level_idx)
                 loss = F.mse_loss(x_hat, x.view(x.size(0), -1))
@@ -137,21 +141,51 @@ class NGAutoEncoder(nn.Module):
 
     def stability_phase(
         self,
-        data_loader: DataLoader,
+        new_data_loader: DataLoader,
         lr: float,
         epochs: int,
+        ir: Optional[IntrinsicReplay] = None,
+        class_id: Optional[Any] = None,
+        replay_size: int = 0,
         device: Optional[torch.device] = None,
     ) -> None:
         """
-        Retrain all weights on combined data for stability.
+        Retrain all weights on combined new data and IR samples for stability.
+        Args:
+            new_data_loader: DataLoader yielding (x, ) batches
+            lr: learning rate
+            epochs: number of epochs
+            ir: IntrinsicReplay instance
+            class_id: identifier for class to sample from IR
+            replay_size: number of IR samples
         """
         device = device or next(self.parameters()).device
         self.to(device)
+
+        # gather new examples
+        try:
+            new_x = new_data_loader.dataset.tensors[0]
+        except Exception:
+            new_x = torch.cat([batch[0] for batch in new_data_loader], dim=0)
+        new_x = new_x.to(device)
+
+        # gather IR examples if provided
+        if ir is not None and class_id is not None and replay_size > 0:
+            old_x = ir.sample_images(class_id, replay_size).to(device)
+            combined_x = torch.cat([new_x, old_x], dim=0)
+        else:
+            combined_x = new_x
+
+        combined_loader = DataLoader(
+            TensorDataset(combined_x), batch_size=new_data_loader.batch_size, shuffle=True
+        )
+
+        # unfreeze all
         self.set_requires_grad(freeze_old=False)
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
         for _ in range(epochs):
-            for x in data_loader:
-                x = x.to(device)
+            for x in combined_loader:
+                x = x[0].to(device)
                 recon = self.forward(x)["recon"]
                 loss = F.mse_loss(recon, x.view(x.size(0), -1))
                 optimizer.zero_grad()
