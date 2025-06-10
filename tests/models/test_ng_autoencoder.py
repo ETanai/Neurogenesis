@@ -120,5 +120,76 @@ def test_stability_phase_with_ir(simple_ae, toy_input):
         assert not torch.allclose(param, orig[name])
 
 
+def test_grid_recon_flat(simple_ae, toy_input):
+    # no reshaping
+    out = simple_ae.grid_recon(toy_input)
+    B, F_in = toy_input.shape
+    # grid_recon should double the batch (orig + recon)
+    assert out.shape == (2 * B, F_in)
+    # even rows == original flatten, odd rows == reconstructions
+    torch.testing.assert_allclose(out[0], toy_input.view(B, -1)[0])
+    torch.testing.assert_allclose(out[1], out[0])  # identity AE: recon == orig
+
+
+def test_grid_recon_view_shape(simple_ae, toy_input):
+    # reshape into (1,3)
+    out = simple_ae.grid_recon(toy_input, view_shape=(1, 3))
+    B, F_in = toy_input.shape
+    assert out.shape == (2 * B, 1, 3)
+    # check a sample
+    torch.testing.assert_allclose(out[2], toy_input.view(B, -1)[1].view(1, 3))
+
+
+# --- in tests/training/test_neurogenesis_trainer.py ---
+
+
+def test_history_tracking(dummy_loader):
+    # stub AE so that no growth occurs (errors below threshold)
+    class AEStub:
+        hidden_sizes = [1, 1]
+
+        def forward_partial(self, x, level):
+            return x.view(x.size(0), -1)
+
+        @staticmethod
+        def reconstruction_error(x_hat, x):
+            # always small error => no growth
+            return torch.zeros(x.size(0))
+
+        def add_new_nodes(self, *args, **kwargs):
+            pass
+
+        def plasticity_phase(self, *args, **kwargs):
+            pass
+
+        def stability_phase(self, *args, **kwargs):
+            pass
+
+    class IRStub:
+        def fit(self, loader):
+            pass
+
+        def sample_images(self, *args, **kwargs):
+            return torch.zeros(1, 1)
+
+    from training.neurogenesis_trainer import NeurogenesisTrainer
+
+    ae = AEStub()
+    ir = IRStub()
+    thresholds = [0.1, 0.1]
+    max_nodes = [5, 5]
+    trainer = NeurogenesisTrainer(ae, ir, thresholds, max_nodes, max_outliers=0.5)
+    trainer.learn_class(class_id="test", loader=dummy_loader)
+
+    # history should have an entry for each layer, once before growth
+    hist = trainer.history["test"]["layer_errors"]
+    # two layers => two snapshots
+    assert len(hist) == 2
+    # each Tensor should have length == number of samples (4)
+    for errs in hist:
+        assert isinstance(errs, torch.Tensor)
+        assert errs.numel() == len(dummy_loader.dataset)
+
+
 if __name__ == "__main__":
     pytest.main()

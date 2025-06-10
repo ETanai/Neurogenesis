@@ -191,3 +191,27 @@ class NGAutoEncoder(nn.Module):
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+
+    def grid_recon(self, x: Tensor, view_shape: Optional[tuple[int, ...]] = None) -> Tensor:
+        """
+        Return a batch‐wise concatenation of input vs. reconstruction,
+        ready to reshape back into images.
+
+        Args:
+            x:      (B, *) input batch (e.g. flattened images).
+            view_shape: optional shape to view into (e.g. (1,28,28)).
+        Returns:
+            Tensor of shape (2*B, *) where even indices are originals,
+            odds are their reconstructions.
+        """
+        # forward
+        out = self.forward(x)
+        recon = out["recon"]
+
+        # stack originals and recon
+        paired = torch.stack([x.view(x.size(0), -1), recon], dim=1)
+        paired = paired.flatten(0, 1)  # now (2*B, features)
+
+        if view_shape is not None:
+            return paired.view(-1, *view_shape)
+        return paired
