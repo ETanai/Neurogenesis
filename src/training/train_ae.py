@@ -8,6 +8,7 @@ from torch import cat, nn, optim
 
 from data.mnist_datamodule import MNISTDataModule
 from models.autoencoder import AutoEncoder
+
 from .intrinsic_replay_runner import run_intrinsic_replay
 
 
