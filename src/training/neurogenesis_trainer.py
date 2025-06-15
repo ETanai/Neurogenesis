@@ -11,7 +11,7 @@ from utils.intrinsic_replay import IntrinsicReplay
 class NeurogenesisTrainer:
     """
     Orchestrates sequential class learning with neurogenesis.
-    Stores reconstruction-error history for analysis.
+    Stores per-class, per-layer reconstruction-error history for analysis.
     """
 
     def __init__(
@@ -32,18 +32,14 @@ class NeurogenesisTrainer:
         self.max_nodes = max_nodes
         self.max_outliers = max_outliers
         self.base_lr = base_lr
+
         # epoch settings per phase
         self.plasticity_epochs = plasticity_epochs
         self.stability_epochs = stability_epochs
         self.next_layer_epochs = next_layer_epochs
-        # History: class_id -> {'layer_errors': [Tensor snapshots]}
-        self.history: dict[Any, dict[str, List[Tensor]]] = {}
-        self.ae = ae
-        self.ir = ir
-        self.thresholds = thresholds
-        self.max_nodes = max_nodes
-        self.max_outliers = max_outliers
-        self.base_lr = base_lr
+
+        # History: class_id -> {'layer_errors': List[List[Tensor]]}
+        self.history: dict[Any, dict[str, List[List[Tensor]]]] = {}
 
     def _get_recon_errors(self, loader: DataLoader, level: int) -> Tensor:
         """
@@ -59,6 +55,7 @@ class NeurogenesisTrainer:
     def learn_class(self, class_id: Any, loader: DataLoader) -> None:
         """
         Learn a new class with neurogenesis:
+          - Initialize per-layer error history
           - Fit intrinsic replay stats
           - For each layer:
             - Compute outliers > threshold
@@ -66,12 +63,16 @@ class NeurogenesisTrainer:
               - Add neurons
               - Plasticity phase (new nodes)
               - Stability phase (with IR replay)
+            - Record errors into history[class_id]['layer_errors'][level]
             - One plasticity epoch on next layer
         """
+        # initialize per-class, per-layer history
+        num_layers = len(self.ae.hidden_sizes)
+        self.history[class_id] = {"layer_errors": [[] for _ in range(num_layers)]}
+
         # fit IR stats on new data
         self.ir.fit(loader)
 
-        num_layers = len(self.ae.hidden_sizes)
         for level in range(num_layers):
             # compute errors and find outliers
             errs = self._get_recon_errors(loader, level)
@@ -98,9 +99,10 @@ class NeurogenesisTrainer:
                     replay_size=num_new,
                 )
 
-                # recompute and record
+                # recompute errors and record snapshot
                 errs = self._get_recon_errors(loader, level)
-                self.history[class_id]["layer_errors"].append(errs.clone())
+                self.history[class_id]["layer_errors"][level].append(errs.clone())
+
                 outliers = errs > self.thresholds[level]
                 added += 1
 

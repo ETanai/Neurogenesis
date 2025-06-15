@@ -1,12 +1,11 @@
 import pytorch_lightning as pl
 import torch.nn.functional as F
-from pytorch_lightning.loggers import MLFlowLogger
 from torch import Tensor
-from torch.utils.data import DataLoader
 
 from models.ng_autoencoder import NGAutoEncoder
 from training.neurogenesis_trainer import NeurogenesisTrainer
 from utils.intrinsic_replay import IntrinsicReplay
+from utils.viz_utils import plot_recon_error_history, plot_recon_grid
 
 
 class NeurogenesisLightningModule(pl.LightningModule):
@@ -77,21 +76,17 @@ class NeurogenesisLightningModule(pl.LightningModule):
             for lvl, count in enumerate(self.ae.hidden_sizes):
                 self.log(f"layer{lvl}_neurons", count, on_epoch=True)
 
-    def set_class_loader(self, class_id: any, loader: DataLoader) -> None:
-        """
-        Provide a new-class DataLoader so that on_train_epoch_end can run neurogenesis.
-        """
-        self.class_loader = (class_id, loader)
-
-
-def build_mlflow_logger(
-    experiment_name: str = "neurogenesis",
-    tracking_uri: str = None,
-) -> MLFlowLogger:
-    """
-    Create an MLFlowLogger for Lightning
-    """
-    return MLFlowLogger(
-        experiment_name=experiment_name,
-        tracking_uri=tracking_uri,
-    )
+                # Now log artifact figures via MLflow, if logger available
+            if hasattr(self, "logger") and self.logger is not None:
+                run_id = self.logger.run_id
+                # 1) Reconstruction-error history
+                fig1 = plot_recon_error_history(self.trainer_ng, class_id)
+                self.logger.experiment.log_figure(
+                    run_id, fig1, f"{class_id}_recon_error_history.png"
+                )
+                # 2) Reconstruction grid (use first batch of loader)
+                x_batch, _ = next(iter(loader))
+                # derive view_shape assuming square images
+                side = int(self.hparams.input_dim**0.5)
+                fig2 = plot_recon_grid(self.ae, x_batch, view_shape=(1, side, side))
+                self.logger.experiment.log_figure(run_id, fig2, f"{class_id}_recon_grid.png")
