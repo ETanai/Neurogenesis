@@ -30,7 +30,7 @@ class IntrinsicReplay:
         self.encoder = encoder.eval().to(device)
         self.decoder = decoder.eval().to(device)
         self.eps = eps
-        self.device = device or next(encoder.parameters()).device
+        self.device = device or (torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
         # Will hold per-class: {"class_id": {"mean": (d,), "L": (d,d)}}
         self.stats: Dict[int, Dict[str, torch.Tensor]] = {}
