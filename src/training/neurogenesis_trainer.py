@@ -28,7 +28,10 @@ class NeurogenesisTrainer:
         plasticity_epochs: int = 5,
         stability_epochs: int = 2,
         next_layer_epochs: int = 1,
+        factor_max_new_nodes: float = 0.1,
+        factor_new_nodes: float = 0.1,
         logger: MLFlowLogger = None,
+        mean_layer_losses=None,
     ):
         self.ae = ae
         self.ir = ir
@@ -37,6 +40,9 @@ class NeurogenesisTrainer:
         self.max_outliers = max_outliers
         self.base_lr = base_lr
         self.logger = logger
+        self.factor_max_new_nodes = factor_max_new_nodes
+        self.factor_new_nodes = factor_new_nodes
+        self.mean_layer_losses = mean_layer_losses
 
         # counter for how many classes we've learned so far
         self._class_count = 0
@@ -55,37 +61,47 @@ class NeurogenesisTrainer:
         """
         errors = []
         for batch in loader:
-            x = batch[0]
+            x = batch[0].to(next(self.ae.parameters()).device)
             x_hat = self.ae.forward_partial(x, level)
             errors.append(self.ae.reconstruction_error(x_hat, x))
         return torch.cat(errors)
 
     def _get_outliers(self, loader: DataLoader, level: int):
-        """
-        Identify outlier samples whose reconstruction error exceeds threshold at given level.
-        Returns:
-          - n_outliers: int
-          - outlier_loader: DataLoader with only outlier samples
-        """
-        errors = []
-        indices = []
-        all_data = []
-        for batch in loader:
-            x, y = batch[0], batch[1] if len(batch) > 1 else None
-            err = self.ae.reconstruction_error(self.ae.forward_partial(x, level), x)
-            batch_size = x.size(0)
-            for i in range(batch_size):
-                errors.append(err[i].item())
-                all_data.append((x[i], y[i] if y is not None else None))
-                indices.append(len(indices))
-        errors = torch.tensor(errors)
-        mask = errors > self.thresholds[level]
-        n_outliers = int(mask.sum().item())
+        device = next(self.ae.parameters()).device
 
-        # gather outlier samples
-        outlier_indices = [i for i, m in enumerate(mask) if m]
-        # assuming uniform dataset mapping, use Subset
-        subset = Subset(loader.dataset, outlier_indices)
+        # 1) Collect all per-sample errors into a single flat Tensor
+        errors = []
+        for batch in loader:
+            x, _ = batch
+            x = x.to(device, non_blocking=True)
+            err = self.ae.reconstruction_error(
+                self.ae.forward_partial(x, level), x
+            )  # shape: [batch_size]
+            errors.append(err.detach().cpu())
+        errors = torch.cat(errors)  # [N]
+        # print(f"[DEBUG] Errors[:10] = {errors[:10].tolist()}  mean={errors.mean().item():.4f}")
+
+        # 2) Compare to threshold
+        thr = self.thresholds[level]
+        mask = errors > thr
+        # print(f"[DEBUG] threshold = {thr:.4f}, errors>thr mask[:10] = {mask[:10].tolist()}")
+        n_outliers = int(mask.sum().item())
+        # print(f"[DEBUG] n_outliers = {n_outliers} / {len(errors)}")
+
+        # 3) Find the *real* dataset indices you iterated over
+        if hasattr(loader, "sampler") and hasattr(loader.sampler, "idxs"):
+            all_indices = loader.sampler.idxs
+        else:
+            # if loader.dataset is a Subset, its .indices attr points into the full dataset
+            all_indices = getattr(loader.dataset, "indices", list(range(len(loader.dataset))))
+        # print(f"[DEBUG] first 10 all_indices = {all_indices[:10]}")
+
+        # 4) Map mask→real indices
+        outlier_real_idxs = [all_indices[i] for i, m in enumerate(mask) if m]
+        # print(f"[DEBUG] first 10 outlier_real_idxs = {outlier_real_idxs[:10]}")
+
+        # 5) Build subset & return loader
+        subset = Subset(loader.dataset, outlier_real_idxs)
         outlier_loader = DataLoader(
             subset,
             batch_size=loader.batch_size,
@@ -128,36 +144,52 @@ class NeurogenesisTrainer:
 
         pbar_levels = tqdm(range(num_layers), desc=f"[Class {class_id}] Layers", unit="lvl")
         for level in pbar_levels:
+            added = 0
+            self.ae._plastic_to_mature()
+            n_plastic_neurons = 0
             n_outliers, outliers_loader = self._get_outliers(loader, level)
             if self.logger:
                 self.logger.log_metrics(
                     {f"class_{class_id}_level_{level}_n_outliers": n_outliers},
-                    step=self._class_count,
+                    step=added,
                 )
 
-            added = 0
             max_rounds = self.max_nodes[level]
             pbar_growth = tqdm(
                 range(max_rounds), desc=f"  Level {level} Growth", unit="rnd", leave=False
             )
+
+            step_plasticety = 0
+            step_stability = 0
+
             for i_growth in pbar_growth:
-                if not (n_outliers > self.max_outliers * n_outliers and added < max_rounds):
+                if not (n_outliers > self.max_outliers and added < max_rounds):
                     break
 
-                num_new = int(math.ceil(0.1 * n_outliers))
+                num_new = int(math.ceil(self.factor_new_nodes * n_outliers))
+                nodes_existing = self.ae.encoder[2 * level].n_out_features
+                max_new = int(math.ceil(self.factor_max_new_nodes * nodes_existing))
+                num_new = int(min([num_new, max_new]))
                 self.ae.add_new_nodes(level, num_new)
+                n_plastic_neurons += num_new
+                if self.logger:
+                    self.logger.log_metrics(
+                        {f"class_{class_id}_level_{level}_n_plastic_neurons": n_plastic_neurons},
+                        step=added,
+                    )
                 # Plasticity phase (epochs)
 
-                for i in tqdm(
+                last_loss = 1
+                for epoch in tqdm(
                     range(self.plasticity_epochs), desc="   Plasticity", unit="ep", leave=False
                 ):
                     losses_plasticety = []
                     losses_stability = []
-                    for batch in outliers_loader:
+                    for i_b, batch in enumerate(outliers_loader):
                         x = batch[0].to(device, non_blocking=True)
                         opt = self.ae._optim_plasticity(level, self.base_lr)
                         opt.zero_grad(set_to_none=True)
-                        x_hat = self.ae.forward_partial(x, level + 1)
+                        x_hat = self.ae.forward_partial(x, level)
                         if isinstance(x_hat, dict):
                             x_hat = x_hat["recon"]
                         loss = self.ae.reconstruction_error(x_hat, x).mean()
@@ -165,19 +197,33 @@ class NeurogenesisTrainer:
                         loss.backward()
                         opt.step()
 
+                    delat_loss = last_loss - torch.tensor(losses_plasticety).mean()
+
                     if self.logger:
                         self.logger.log_metrics(
                             {
                                 f"class_{class_id}_level_{level}_loss_plasticety": sum(
                                     losses_plasticety
                                 )
-                                / len(losses_plasticety)
+                                / len(losses_plasticety),
+                                f"class_{class_id}_level_{level}_delta_loss_plasticety": delat_loss,
                             },
-                            step=i_growth * i * added + i,
+                            step_plasticety,
                         )
+                    step_plasticety += 1
+                    # if (
+                    #     torch.tensor(losses_plasticety).mean()
+                    #     <= self.mean_layer_losses[level] * 0.8
+                    # ):
+                    #     break
 
+                    if delat_loss <= 0.002:
+                        break
+
+                    last_loss = torch.tensor(losses_plasticety).mean()
                 # Stability phase (epochs)
-                for _ in tqdm(
+                last_loss = 1
+                for epoch in tqdm(
                     range(self.stability_epochs), desc="   Stability", unit="ep", leave=False
                 ):
                     for batch in outliers_loader:
@@ -197,35 +243,41 @@ class NeurogenesisTrainer:
                         losses_stability.append(loss)
                         loss.backward()
                         opt.step()
-
+                    new_loss = torch.tensor(losses_stability).mean()
+                    delta_loss = last_loss - new_loss
+                    last_loss = new_loss
                     if self.logger:
                         self.logger.log_metrics(
                             {
-                                f"class_{class_id}_level_{level}_loss_plasticety": sum(
+                                f"class_{class_id}_level_{level}_loss_stability": sum(
                                     losses_stability
                                 )
-                                / len(losses_stability)
+                                / len(losses_stability),
+                                f"class_{class_id}_level_{level}_delta_loss_stability": delta_loss,
                             },
-                            step=i_growth * i * added + i,
+                            step_stability,
                         )
+                    step_stability += 1
+                    # if torch.tensor(losses_stability).mean() <= self.mean_layer_losses[level] * 0.8:
+                    #     break
+                    # if delta_loss <= 0.0007:
+                    #     break
 
                 # recompute errors & log
                 errs = self._get_recon_errors(loader, level)
                 self.history[class_id]["layer_errors"][level].append(errs.clone())
                 if self.logger:
                     self.logger.log_metrics(
-                        {
-                            f"class_{class_id}_level_{level}_avg_loss_step_{added}": errs.mean().item()
-                        },
-                        step=self._class_count,
+                        {f"class_{class_id}_level_{level}_avg_loss": errs.mean().item()},
+                        step=added,
                     )
 
                 added += 1
-                n_outliers, _ = self._get_outliers(loader, level)
+                n_outliers, outliers_loader = self._get_outliers(loader, level)
                 if self.logger:
                     self.logger.log_metrics(
                         {f"class_{class_id}_level_{level}_n_outliers": n_outliers},
-                        step=self._class_count,
+                        step=added,
                     )
 
                 pbar_growth.update(1)
@@ -238,7 +290,11 @@ class NeurogenesisTrainer:
                     loader, level + 1, epochs=self.next_layer_epochs, lr=self.base_lr / 100
                 )
                 self.ae.stability_phase(
-                    loader, lr=self.base_lr / 100, epochs=self.stability_epochs, old_x=old_x
+                    loader,
+                    level + 1,
+                    lr=self.base_lr / 100,
+                    epochs=self.stability_epochs,
+                    old_x=old_x,
                 )
 
             if self.logger:
@@ -261,6 +317,8 @@ class NeurogenesisTrainer:
         Evaluate the autoencoder at each encoder depth and return the mean reconstruction loss per level.
         """
         mean_losses: List[float] = []
+        max_losses: List[float] = []
+        std_losses: List[float] = []
 
         # Ensure model is in evaluation mode
         self.ae.eval()
@@ -270,12 +328,18 @@ class NeurogenesisTrainer:
                 errors = self._get_recon_errors(loader, level)
                 # Mean loss for the level
                 mean_loss = errors.mean().item()
+                max_loss = errors.max().item()
+                std_loss = errors.std().item()
                 mean_losses.append(mean_loss)
+                max_losses.append(max_loss)
+                std_losses.append(std_loss)
 
                 # Log metric if logger is available
                 if self.logger:
-                    self.logger.log_metrics({f"test_level_{level}_mean_loss": mean_loss})
+                    self.logger.log_metrics({"test_mean_loss": mean_loss}, level)
+                    self.logger.log_metrics({"test_max_loss": max_loss}, level)
+                    self.logger.log_metrics({"test_std_loss": std_loss}, level)
 
         # Restore training mode
         self.ae.train()
-        return mean_losses
+        return mean_losses, max_losses, std_losses
