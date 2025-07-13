@@ -46,6 +46,9 @@ class NeurogenesisLightningModule(pl.LightningModule):
             activation_latent=self.hparams.activation_latent,
             activation_last=self.hparams.activation_last,
         )
+
+        # self.ae = VariableMLPAutoencoder([784, 200, 100, 60, 20])
+
         self.ir = IntrinsicReplay(self.ae.encoder, self.ae.decoder)
         self.trainer_ng = NeurogenesisTrainer(
             ae=self.ae,
@@ -68,9 +71,9 @@ class NeurogenesisLightningModule(pl.LightningModule):
 
     def training_step(self, batch: tuple[Tensor, Tensor], batch_idx: int) -> Tensor:
         x, _ = batch
-        # Pretrain AE: log MSE loss
+        # Pretrain AE: log BCE loss
         out = self.ae(x)
-        loss = F.mse_loss(out["recon"], x.view(x.size(0), -1))
+        loss = F.binary_cross_entropy(out["recon"], x.view(x.size(0), -1))
         self.log("pretrain_loss", loss, prog_bar=True)
         # Mark pretraining done after specified epochs
         if self.current_epoch + 1 >= self.hparams.pretrain_epochs:
