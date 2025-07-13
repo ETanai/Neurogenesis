@@ -24,7 +24,7 @@ def plot_recon_error_history(
     fig, ax = plt.subplots(figsize=figsize)
     # For each growth snapshot, history[i] is error tensor for that iteration
     # Plot mean error over iterations
-    means: List[float] = [errs.mean().item() for errs in history]
+    means: List[float] = [errs[0].mean().item() for errs in history]
     ax.plot(range(len(means)), means, marker="o")
     ax.set_xlabel("Iteration")
     ax.set_ylabel("Mean Reconstruction Error")
@@ -63,9 +63,9 @@ def plot_recon_grid(
         # convert to 2D array
         if img.ndim == 1:
             side = int(img.numel() ** 0.5)
-            arr = img.view(side, side).cpu().numpy()
+            arr = img.view(side, side).detach().numpy()
         else:
-            arr = img.squeeze().cpu().numpy()
+            arr = img.squeeze().detach().numpy()
         axes[idx].imshow(arr, interpolation="nearest")
         axes[idx].axis("off")
     # hide extra axes
