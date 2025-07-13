@@ -35,7 +35,9 @@ class NGLinear(nn.Module):
         super().__init__()
         self.in_features = in_features
         self.negative_slope = negative_slope
-
+        self.n_out_features = out_features_mature + out_features_plastic
+        self.out_features_mature = out_features_mature
+        self.out_features_plastic = out_features_plastic
         # mature (initially frozen) tensors
         self.weight_mature = nn.Parameter(
             torch.empty(out_features_mature, in_features), requires_grad=True
@@ -68,26 +70,36 @@ class NGLinear(nn.Module):
         return out
 
     # -------------- neurogenesis ops --------------
-    def add_plastic_nodes(self, num_new: int) -> Tuple[nn.Parameter, nn.Parameter]:
-        """
-        Append `num_new` trainable neurons to the plastic block and return them.
-        """
+    def add_plastic_nodes(self, num_new: int) -> None:
         if num_new <= 0:
             raise ValueError("num_new must be positive")
 
+        device = self.weight_mature.device
+        in_f = self.in_features
+
+        # 1) Create a new Parameter that pads the old plastic block
         if self.weight_plastic is None:
-            # first plastic block
-            self.weight_plastic, self.bias_plastic = self._make_block(num_new, trainable=True)
+            old_w = torch.empty((0, in_f), device=device)
+            old_b = torch.empty((0,), device=device)
         else:
-            w_extra, b_extra = self._make_block(num_new, trainable=True)
-            with torch.no_grad():
-                self.weight_plastic = nn.Parameter(
-                    torch.cat([self.weight_plastic, w_extra], dim=0), requires_grad=True
-                )
-                self.bias_plastic = nn.Parameter(
-                    torch.cat([self.bias_plastic, b_extra], dim=0), requires_grad=True
-                )
-        return self.weight_plastic[-num_new:], self.bias_plastic[-num_new:]
+            old_w = self.weight_plastic.data
+            old_b = self.bias_plastic.data
+
+        # new block
+        new_w_block = torch.empty((num_new, in_f), device=device)
+        new_b_block = torch.empty((num_new,), device=device)
+        nn.init.kaiming_uniform_(new_w_block, a=math.sqrt(5))
+        nn.init.zeros_(new_b_block)
+
+        # concatenate & replace
+        w_cat = torch.cat([old_w, new_w_block], dim=0)
+        b_cat = torch.cat([old_b, new_b_block], dim=0)
+        self.weight_plastic = nn.Parameter(w_cat, requires_grad=True)
+        self.bias_plastic = nn.Parameter(b_cat, requires_grad=True)
+
+        # update counters
+        self.out_features_plastic += num_new
+        self.n_out_features += num_new
 
     def promote_plastic_to_mature(self) -> None:
         """
@@ -110,6 +122,8 @@ class NGLinear(nn.Module):
         # drop the old plastic references
         self.weight_plastic = None
         self.bias_plastic = None
+        self.out_features_mature += self.out_features_plastic
+        self.out_features_plastic = 0
 
     # -------------- helpers for optimiser --------------
     def parameters_plastic(self) -> Iterable[nn.Parameter]:
@@ -146,23 +160,25 @@ class NGLinear(nn.Module):
             yield p
 
     def adjust_input_size(self, num_new_inputs: int) -> None:
-        """
-        Expand input feature count — grows every existing weight matrix.
-        """
         if num_new_inputs <= 0:
             return
 
-        self.in_features += num_new_inputs
+        device = self.weight_mature.device
+        old_in = self.in_features
+        new_in = old_in + num_new_inputs
+        self.in_features = new_in
 
-        def _grow_weight(W: nn.Parameter) -> None:
-            extra = torch.empty(W.size(0), num_new_inputs, dtype=W.dtype, device=W.device)
+        # helper to rebuild a block entirely
+        def rebuild_block(old_param: nn.Parameter) -> nn.Parameter:
+            old_data = old_param.data
+            out_f, _ = old_data.shape
+            extra = torch.empty((out_f, num_new_inputs), device=device)
             nn.init.kaiming_uniform_(extra, a=math.sqrt(5))
-            with torch.no_grad():
-                W.data = torch.cat([W.data, extra], dim=1)
+            new_data = torch.cat([old_data, extra], dim=1)
+            return nn.Parameter(new_data, requires_grad=old_param.requires_grad)
 
-        # grow mature (always present)
-        _grow_weight(self.weight_mature)
-
-        # grow plastic block if it exists
+        # 1) mature weights
+        self.weight_mature = rebuild_block(self.weight_mature)
+        # 2) plastic weights (if any)
         if self.weight_plastic is not None:
-            _grow_weight(self.weight_plastic)
+            self.weight_plastic = rebuild_block(self.weight_plastic)
