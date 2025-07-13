@@ -21,7 +21,7 @@ if __name__ == "__main__":
         data_dir=cfg.datamodule.data_dir,
         batch_size=cfg.datamodule.batch_size,
         num_workers=cfg.datamodule.num_workers,
-        classes=cfg.datamodule.cls_pretraining,  # or list of classes, e.g. [1,7]
+        classes=cfg.pretraining.classes_pretraining,  # or list of classes, e.g. [1,7]
     )
     # Download and set up datasets
     dm.prepare_data()
@@ -29,8 +29,6 @@ if __name__ == "__main__":
     # preview batch shapes
     batch = next(iter(dm.train_dataloader()))
     print([x.shape for x in batch])
-
-    cfg.trainer
 
     model = NeurogenesisLightningModule(
         input_dim=28 * 28,
@@ -42,7 +40,7 @@ if __name__ == "__main__":
         max_nodes=cfg.neurogenesis.max_nodes,
         max_outliers=cfg.neurogenesis.max_outliers,
         base_lr=cfg.neurogenesis.base_lr,
-        plasticity_epochs=cfg.neurogenesis.plasticity_epochs,
+        plasticity_epochs=cfg.neurogenesis.plasticity_epochs_max,
         stability_epochs=cfg.neurogenesis.stability_epochs,
         next_layer_epochs=cfg.neurogenesis.next_layer_epochs,
     )
@@ -73,6 +71,8 @@ if __name__ == "__main__":
     ae = model.ae
     ir = model.ir
 
+    ae.to(device)
+
     # Build the NeurogenesisTrainer with the same hyperparams
     trainer_ng = NeurogenesisTrainer(
         ae=ae,
@@ -81,16 +81,27 @@ if __name__ == "__main__":
         max_nodes=cfg.neurogenesis.max_nodes,
         max_outliers=cfg.neurogenesis.max_outliers,
         base_lr=cfg.neurogenesis.base_lr,
-        plasticity_epochs=cfg.neurogenesis.plasticity_epochs,
+        plasticity_epochs=cfg.neurogenesis.plasticity_epochs_max,
         stability_epochs=cfg.neurogenesis.stability_epochs,
         next_layer_epochs=cfg.neurogenesis.next_layer_epochs,
+        factor_new_nodes=cfg.neurogenesis.factor_new_nodes,
+        factor_max_new_nodes=cfg.neurogenesis.factor_new_nodes,
         logger=logger,
     )
 
-    threshoulds = (
-        trainer_ng.test_all_levels(dm.get_combined_dataloader(cfg.datamodule.cls_pretraining)) * 1.5
-    )
+    (
+        mean_layer_losses,
+        max_layer_losses,
+        std_layer_losses,
+    ) = trainer_ng.test_all_levels(dm.get_combined_dataloader(cfg.datamodule.cls_pretraining))
+    # threshoulds = [t * cfg.neurogenesis.factor_thr for t in mean_layer_losses]
+    threshoulds = torch.tensor(mean_layer_losses) + (3 * torch.tensor(std_layer_losses))
+    # threshoulds = max_layer_losses
+
     trainer_ng.thresholds = threshoulds
+    trainer_ng.mean_layer_losses = mean_layer_losses
+    for i, t in enumerate(threshoulds):
+        trainer_ng.logger.log_metrics({"threshoulds": t}, i)
 
     # Grow network one class at a time
     for cls in cfg.ir.class_sequence:
