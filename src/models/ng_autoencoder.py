@@ -119,7 +119,6 @@ class NGAutoEncoder(nn.Module):
 
         if ret_lat:
             return out, lat
-
         return out
 
     @staticmethod
@@ -151,109 +150,26 @@ class NGAutoEncoder(nn.Module):
             p
             for n, p in module.named_parameters()
             if "weight_new_blocks" in n or "bias_new_blocks" in n
-            # DEBUG
         ]
 
     # -------------------------------------------------
 
-    def add_new_nodes(self, level: int, num_new: int) -> None:
+    def add_new_nodes(self, level: int, num_new: int):
         enc = self._encoder_layer(level)
-        dec = self._decoder_layer(level)
+        enc.add_plastic_nodes(num_new)
 
-        enc.add_plastic_nodes(num_new)  # rows  ↑
+        dec_mirror = self._decoder_layer(level)
+        dec_mirror.adjust_input_size(num_new)
+
         if level + 1 < len(self.hidden_sizes):
-            self._encoder_layer(level + 1).adjust_input_size(num_new)  # cols →
-            self._decoder_layer(level + 1).add_plastic_nodes(num_new)  # cols →
-        dec.adjust_input_size(num_new)  # mirror
+            enc_next = self._encoder_layer(level + 1)
+            enc_next.adjust_input_size(num_new)
+
+        if level + 1 < len(self.hidden_sizes):
+            dec_next = self._decoder_layer(level + 1)
+            dec_next.add_plastic_nodes(num_new)
 
         self.hidden_sizes[level] += num_new
-
-    # def plasticity_phase(
-    #     self,
-    #     data_loader: DataLoader,
-    #     level_idx: int,
-    #     epochs: int,
-    #     lr: float,
-    #     device: Optional[torch.device] = None,
-    # ) -> None:
-    #     """
-    #     Train new neurons at given layer on data_loader.
-    #     Old neurons frozen; only new parameters updated.
-    #     """
-    #     print("plasticety phase")
-    #     device = device or next(self.parameters()).device
-    #     self.to(device)
-    #     self.set_requires_grad(freeze_old=True)
-    #     # collect trainable params
-    #     params = [p for p in self.parameters() if p.requires_grad]
-    #     if len(params) == 0:
-    #         return
-    #     optimizer = torch.optim.Adam(params, lr=lr)
-    #     for _ in range(epochs):
-    #         for batch in data_loader:
-    #             # unpack the batch tuple
-    #             if isinstance(batch, (list, tuple)):
-    #                 x = batch[0]
-    #             else:
-    #                 x = batch
-    #             x = x.to(device)
-    #             x_hat = self.forward_partial(x, level_idx)
-    #             loss = F.mse_loss(x_hat, x.view(x.size(0), -1))
-    #             optimizer.zero_grad()
-    #             loss.backward()
-    #             optimizer.step()
-
-    # def stability_phase(
-    #     self,
-    #     new_data_loader: DataLoader,
-    #     lr: float,
-    #     epochs: int,
-    #     device: Optional[torch.device] = None,
-    #     old_x: torch.Tensor = None,
-    # ) -> None:
-    #     """
-    #     Retrain all weights on combined new data and IR samples for stability.
-    #     Args:
-    #         new_data_loader: DataLoader yielding (x, ) batches
-    #         lr: learning rate
-    #         epochs: number of epochs
-    #         ir: IntrinsicReplay instance
-    #         class_id: identifier for class to sample from IR
-    #         replay_size: number of IR samples
-    #     """
-    #     print("staility phase")
-    #     device = device or next(self.parameters()).device
-    #     self.to(device)
-
-    #     # gather new examples
-    #     try:
-    #         new_x = new_data_loader.dataset.tensors[0]
-    #     except Exception:
-    #         new_x = torch.cat([batch[0] for batch in new_data_loader], dim=0)
-    #     new_x = new_x.to(device)
-
-    #     # gather IR examples if provided
-
-    #     if old_x is not None:
-    #         combined_x = torch.cat([new_x, old_x.view([old_x.shape[0]] + [1, 28, 28])], dim=0)
-    #     else:
-    #         combined_x = new_x
-
-    #     combined_loader = DataLoader(
-    #         TensorDataset(combined_x), batch_size=new_data_loader.batch_size, shuffle=True
-    #     )
-
-    #     # unfreeze all
-    #     self.set_requires_grad(freeze_old=False)
-    #     optimizer = torch.optim.Adam(self.parameters(), lr=lr)
-    #     for _ in range(epochs):
-    #         for x in combined_loader:
-    #             x = x[0].to(device)
-    #             recon = self.forward(x)["recon"]
-    #             loss = F.mse_loss(recon, x.view(x.size(0), -1))
-    #             optimizer.zero_grad()
-    #             loss.backward()
-    #             optimizer.step()
 
     def grid_recon(self, x: Tensor, view_shape: Optional[tuple[int, ...]] = None) -> Tensor:
         """
@@ -339,16 +255,16 @@ class NGAutoEncoder(nn.Module):
         lr_p_d = lr_p_d or lr_p
         lr_m_d = lr_m_d or (lr_p / 100.0)
 
-        # pick the layer modules
-        enc = self._encoder_layer(level)
-        dec = self._decoder_layer(level)
+        # # pick the layer modules
+        # enc = self._encoder_layer(level)
+        # dec = self._decoder_layer(level)
 
         # collect disjoint param lists
-        new_enc = list(self._new_param_mask(enc))
-        old_enc = [p for p in enc.parameters() if p not in new_enc]
+        new_enc = [p for p in self.parameters_plastic_enc()]
+        old_enc = [p for p in self.parameters_mature_enc()]
 
-        new_dec = list(self._new_param_mask(dec))
-        old_dec = [p for p in dec.parameters() if p not in new_dec]
+        new_dec = [p for p in self.parameters_plastic_dec()]
+        old_dec = [p for p in self.parameters_mature_dec()]
 
         # freeze everything first
         for p in self.parameters():
@@ -381,8 +297,10 @@ class NGAutoEncoder(nn.Module):
         opt = self._optim_plasticity(level, lr)
         self._run_epoch_loop(loader, opt, epochs)
 
-    def stability_phase(self, loader, lr: float, epochs: int, old_x: torch.Tensor | None):
-        opt = self._optim_stability(lr)
+    def stability_phase(
+        self, loader, level: int, lr: float, epochs: int, old_x: torch.Tensor | None
+    ):
+        opt = self._optim_stability(level, lr)
         self._run_epoch_loop(loader, opt, epochs, replay=old_x)
 
     def _run_epoch_loop(
@@ -419,3 +337,11 @@ class NGAutoEncoder(nn.Module):
                 loss = self.reconstruction_error(x_hat, x).mean()
                 loss.backward()
                 optim.step()
+
+    def _plastic_to_mature(self):
+        for module in self.encoder:
+            if isinstance(module, NGLinear):
+                module.promote_plastic_to_mature()
+        for module in self.decoder:
+            if isinstance(module, NGLinear):
+                module.promote_plastic_to_mature()
