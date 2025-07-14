@@ -53,6 +53,8 @@ def plot_recon_grid(
         matplotlib Figure object
     """
     # get paired originals and reconstructions
+    device = next(ae.parameters()).device
+    x.to(device)
     paired = ae.grid_recon(x, view_shape=view_shape)  # shape (2B, C, H, W) or (2B, features)
     num = paired.shape[0]
     nrows = (num + ncols - 1) // ncols
