@@ -1,0 +1,347 @@
+from copy import deepcopy
+from functools import partial
+from typing import List, Optional
+
+import torch
+import torch.nn.functional as F
+from torch import Tensor, nn
+from torch.optim import AdamW
+
+from models.ng_linear import NGLinear  # <-- your custom layer
+
+_ACTS: dict[str, type[nn.Module]] = {
+    "relu": nn.ReLU,
+    "tanh": nn.Tanh,
+    "leaky_relu": partial(nn.LeakyReLU, negative_slope=0.1),
+    "sigmoid": nn.Sigmoid,
+    "identity": lambda: nn.Identity(),
+}
+
+
+class NGAutoEncoder(nn.Module):
+    """Auto‐encoder built with NGLinear (neurogenesis-enabled)."""
+
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_sizes: List[int],
+        activation: str = "relu",
+        activation_latent: str = "identity",
+        activation_last: str = "sigmoid",
+    ):
+        super().__init__()
+        if not hidden_sizes:
+            raise ValueError("Provide at least one hidden layer")
+
+        self.input_dim = input_dim
+        self.hidden_sizes = list(hidden_sizes)
+        act_cls = _ACTS[activation]
+        act_lat_cls = _ACTS[activation_latent]
+        act_last_cls = _ACTS[activation_last]
+
+        enc_layers: list[nn.Module] = []
+        prev_dim = input_dim
+        for h in self.hidden_sizes[:-1]:
+            enc_layers.append(NGLinear(prev_dim, out_features_mature=h, out_features_plastic=0))
+            enc_layers.append(act_cls())
+            prev_dim = h
+        enc_layers.append(
+            NGLinear(prev_dim, out_features_mature=self.hidden_sizes[-1], out_features_plastic=0)
+        )
+        enc_layers.append(act_lat_cls())
+        self.encoder = nn.Sequential(*enc_layers)
+
+        dec_layers: list[nn.Module] = []
+        prev_dim = self.hidden_sizes[-1]
+        for h in reversed(self.hidden_sizes[:-1]):
+            dec_layers.append(NGLinear(prev_dim, out_features_mature=h, out_features_plastic=0))
+            dec_layers.append(act_cls())
+            prev_dim = h
+        dec_layers.append(NGLinear(prev_dim, out_features_mature=input_dim, out_features_plastic=0))
+        dec_layers.append(act_last_cls())
+        self.decoder = nn.Sequential(*dec_layers)
+
+    def forward(self, x: Tensor) -> dict[str, Tensor]:
+        x_flat = x.view(x.size(0), -1)
+        z = self.encoder(x_flat)
+        recon = self.decoder(z)
+        return {"recon": recon, "latent": z}
+
+    def parameters_plastic(self):
+        for m in self.modules():
+            if hasattr(m, "parameters_plastic"):
+                yield from m.parameters_plastic()
+
+    def parameters_mature(self):
+        for m in self.modules():
+            if hasattr(m, "parameters_mature"):
+                yield from m.parameters_mature()
+
+    def parameters_plastic_enc(self):
+        for m in self.encoder.modules():
+            if hasattr(m, "parameters_plastic"):
+                yield from m.parameters_plastic()
+
+    def parameters_mature_enc(self):
+        for m in self.encoder.modules():
+            if hasattr(m, "parameters_mature"):
+                yield from m.parameters_mature()
+
+    def parameters_plastic_dec(self):
+        for m in self.decoder.modules():
+            if hasattr(m, "parameters_plastic"):
+                yield from m.parameters_plastic()
+
+    def parameters_mature_dec(self):
+        for m in self.decoder.modules():
+            if hasattr(m, "parameters_mature"):
+                yield from m.parameters_mature()
+
+    def forward_partial(self, x: Tensor, layer_idx: int, ret_lat: bool = False) -> Tensor:
+        x_flat = x.view(x.size(0), -1)
+        # encode up to and including the activation after layer_idx
+        cut_enc = 2 * layer_idx + 2  # each layer has [NGLinear, act]
+        enc_modules = list(self.encoder[:cut_enc])
+        out = x_flat
+        for module in enc_modules:
+            out = module(out)
+
+        if ret_lat:
+            lat = deepcopy(out)
+
+        # decode from the corresponding mirror layer
+        n = len(self.hidden_sizes)
+        # skip the first 2*(n-1-layer_idx) modules in decoder
+        cut_dec_start = 2 * (n - 1 - layer_idx)
+        dec_modules = list(self.decoder[cut_dec_start:])
+        for module in dec_modules:
+            out = module(out)
+
+        if ret_lat:
+            return out, lat
+        return out
+
+    @staticmethod
+    def reconstruction_error(x_hat: Tensor, x: Tensor) -> Tensor:
+        x_flat = x.view(x.size(0), -1)
+        err = F.mse_loss(x_hat, x_flat, reduction="none")
+        return err.mean(dim=1)
+
+    def set_requires_grad(self, freeze_old: bool = True) -> None:
+        for name, param in self.named_parameters():
+            if "weight_mature" in name or "bias_mature" in name:
+                param.requires_grad = not freeze_old
+            else:
+                param.requires_grad = True
+
+    # -------------------- helpers --------------------
+    def _encoder_layer(self, level: int) -> NGLinear:
+        # encoder is [lin, act, lin, act, …]  so 2*level
+        return self.encoder[2 * level]
+
+    def _decoder_layer(self, level: int) -> NGLinear:
+        # mirror position inside decoder
+        n = len(self.hidden_sizes)
+        return self.decoder[2 * (n - 1 - level)]
+
+    def _new_param_mask(self, module: nn.Module):
+        """Return True for every Parameter that lives in a new-block list."""
+        return [
+            p
+            for n, p in module.named_parameters()
+            if "weight_new_blocks" in n or "bias_new_blocks" in n
+        ]
+
+    # -------------------------------------------------
+
+    def add_new_nodes(self, level: int, num_new: int):
+        enc = self._encoder_layer(level)
+        enc.add_plastic_nodes(num_new)
+
+        dec_mirror = self._decoder_layer(level)
+        dec_mirror.adjust_input_size(num_new)
+
+        if level + 1 < len(self.hidden_sizes):
+            enc_next = self._encoder_layer(level + 1)
+            enc_next.adjust_input_size(num_new)
+
+        if level + 1 < len(self.hidden_sizes):
+            dec_next = self._decoder_layer(level + 1)
+            dec_next.add_plastic_nodes(num_new)
+
+        self.hidden_sizes[level] += num_new
+
+    def grid_recon(self, x: Tensor, view_shape: Optional[tuple[int, ...]] = None) -> Tensor:
+        """
+        Return a batch‐wise concatenation of input vs. reconstruction,
+        ready to reshape back into images.
+
+        Args:
+            x:      (B, *) input batch (e.g. flattened images).
+            view_shape: optional shape to view into (e.g. (1,28,28)).
+        Returns:
+            Tensor of shape (2*B, *) where even indices are originals,
+            odds are their reconstructions.
+        """
+        # forward
+        out = self.forward(x)
+        recon = out["recon"]
+
+        # stack originals and recon
+        paired = torch.stack([x.view(x.size(0), -1), recon], dim=1)
+        paired = paired.flatten(0, 1)  # now (2*B, features)
+
+        if view_shape is not None:
+            return paired.view(-1, *view_shape)
+        return paired
+
+    def assert_valid_structure(self):
+        """
+        Verifies that each Linear in encoder+decoder matches
+        the sequence defined by [input_dim] + hidden_sizes + [input_dim].
+        Raises AssertionError with details on any mismatch.
+        """
+        layersizes = []
+        for layer in list(self.parameters()) + list(self.parameters()):
+            if len(layer.shape) == 2:
+                layersizes.append(layer.shape)
+        for i in range((len(layersizes) - 1)):
+            assert layersizes[i][0] == layersizes[i + 1][1]
+        return True
+
+    def _optim_plasticity(self, level: int, lr: float) -> AdamW:
+        """
+        Plasticity phase:
+        – train only the new (plastic) nodes at full learning rate
+        – freeze all mature (old) parameters
+        """
+        small_lr = lr / 100.0
+        return self._optim_lr_config(
+            level=level,
+            lr_p=lr,  # new encoder nodes
+            lr_m=0.0,  # freeze old encoder
+            lr_p_d=small_lr,  # new decoder nodes
+            lr_m_d=small_lr,  # old decoder nodes
+        )
+
+    def _optim_stability(self, level: int, lr: float) -> AdamW:
+        """
+        Stability phase:
+        – fine‐tune all weights (plastic+mature) at lr/100
+        """
+        small_lr = lr / 100.0
+        return self._optim_lr_config(
+            level=level, lr_p=small_lr, lr_m=small_lr, lr_p_d=small_lr, lr_m_d=small_lr
+        )
+
+    def _optim_lr_config(
+        self,
+        level: int,
+        lr_p: float,
+        lr_m: Optional[float] = None,
+        lr_p_d: Optional[float] = None,
+        lr_m_d: Optional[float] = None,
+    ) -> AdamW:
+        """
+        Configure AdamW optimizer at given depth `level`:
+        - lr_p:     new encoder nodes
+        - lr_m:     old encoder nodes
+        - lr_p_d:   new decoder nodes
+        - lr_m_d:   old decoder nodes
+        """
+
+        # default schedules
+        lr_m = lr_m or (lr_p / 100.0)
+        lr_p_d = lr_p_d or lr_p
+        lr_m_d = lr_m_d or (lr_p / 100.0)
+
+        # # pick the layer modules
+        # enc = self._encoder_layer(level)
+        # dec = self._decoder_layer(level)
+
+        # collect disjoint param lists
+        new_enc = [p for p in self.parameters_plastic_enc()]
+        old_enc = [p for p in self.parameters_mature_enc()]
+
+        new_dec = [p for p in self.parameters_plastic_dec()]
+        old_dec = [p for p in self.parameters_mature_dec()]
+
+        # freeze everything first
+        for p in self.parameters():
+            p.requires_grad_(False)
+
+        # un-freeze exactly those we'll train
+        for p in new_enc:
+            p.requires_grad_(True)
+        for p in old_enc:
+            p.requires_grad_(lr_m != 0)
+        for p in new_dec:
+            p.requires_grad_(True)
+        for p in old_dec:
+            p.requires_grad_(lr_m_d != 0)
+
+        # build optimizer groups, skip zero-lr groups
+        param_groups = []
+        if lr_p != 0:
+            param_groups.append({"params": new_enc, "lr": lr_p})
+        if lr_m != 0:
+            param_groups.append({"params": old_enc, "lr": lr_m})
+        if lr_p_d != 0:
+            param_groups.append({"params": new_dec, "lr": lr_p_d})
+        if lr_m_d != 0:
+            param_groups.append({"params": old_dec, "lr": lr_m_d})
+
+        return AdamW(param_groups)
+
+    def plasticity_phase(self, loader, level: int, epochs: int, lr: float):
+        opt = self._optim_plasticity(level, lr)
+        self._run_epoch_loop(loader, opt, epochs)
+
+    def stability_phase(
+        self, loader, level: int, lr: float, epochs: int, old_x: torch.Tensor | None
+    ):
+        opt = self._optim_stability(level, lr)
+        self._run_epoch_loop(loader, opt, epochs, replay=old_x)
+
+    def _run_epoch_loop(
+        self,
+        loader: torch.utils.data.DataLoader,
+        optim: torch.optim.Optimizer,
+        epochs: int,
+        replay: torch.Tensor | None = None,
+    ) -> None:
+        """
+        Generic train loop:
+        • one forward/backward per batch
+        • optional replay tensor concatenated to every mini-batch
+        """
+        device = next(self.parameters()).device
+        self.train()
+
+        for _ in range(epochs):
+            for batch in loader:
+                x = batch[0].to(device, non_blocking=True)
+
+                # concatenate intrinsic-replay batch if provided
+                if replay is not None:
+                    # sample same #images as current batch
+                    k = x.size(0)
+
+                    idx = torch.randint(0, replay.size(0), (k,), device=device)
+                    x = torch.cat([x, replay[idx].view([k, 1, 28, 28])], dim=0)
+
+                optim.zero_grad(set_to_none=True)
+                x_hat = self.forward(x)
+                if isinstance(x_hat, dict):
+                    x_hat = x_hat["recon"]
+                loss = self.reconstruction_error(x_hat, x).mean()
+                loss.backward()
+                optim.step()
+
+    def _plastic_to_mature(self):
+        for module in self.encoder:
+            if isinstance(module, NGLinear):
+                module.promote_plastic_to_mature()
+        for module in self.decoder:
+            if isinstance(module, NGLinear):
+                module.promote_plastic_to_mature()

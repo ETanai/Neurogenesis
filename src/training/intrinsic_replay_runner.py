@@ -19,7 +19,7 @@ def run_intrinsic_replay(
     *,
     n_samples_per_class: int = 16,
     device: torch.device | None = None,
-) -> None:
+) -> list:
     """Builds an :class:`IntrinsicReplay` from the given dataloader and logs
     sampled images to MLflow.
 
@@ -37,8 +37,11 @@ def run_intrinsic_replay(
     mlflow_client = mlf_logger.experiment
     run_id = mlf_logger.run_id
 
+    imgs_ret = []
+
     for cls in ir.stats:
         imgs = ir.sample_image_tensors(cls, n_samples_per_class, view_shape=(1, 28, 28))
+        imgs_ret.append(imgs)
         grid = torchvision.utils.make_grid(imgs, nrow=int(n_samples_per_class**0.5))
 
         np_img = (grid.permute(1, 2, 0).cpu().numpy() * 255).astype("uint8")
@@ -54,3 +57,4 @@ def run_intrinsic_replay(
             )
 
     print(f"✅ intrinsic-replay artifacts logged under run {run_id}")
+    return imgs_ret
