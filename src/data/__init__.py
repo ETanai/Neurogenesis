@@ -3,3 +3,4 @@ from .__pycache__ import *
 from .mnist_datamodule import *
 from .processed import *
 from .raw import *
+from .sd19_datamodule import *
