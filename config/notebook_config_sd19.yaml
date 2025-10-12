@@ -1,0 +1,79 @@
+# config/notebook_config_sd19.yaml
+# -------------------------------------------------------------------
+# Configuration for Neurogenesis-DL experiments on NIST SD 19
+# -------------------------------------------------------------------
+# ‣ Adjust only the values in ALL_CAPS or obvious placeholders.
+# ‣ Paths can be absolute or relative to the project root.
+# ‣ If you change the SD-19 label mapping, update `ir.class_sequence`
+#   or leave it empty to let the training script derive it automatically.
+# -------------------------------------------------------------------
+
+# -------------------------------------------------------------------
+# DATA
+# -------------------------------------------------------------------
+datamodule:
+  # Point these to the folders created by your SD-19 extraction script.
+  # Expected layout for ImageFolder:
+  #   sd19_train_dir/
+  #       0/ 1/ … 9/ A/ B/ … Z/ a/ b/ … z/
+  #   sd19_val_dir/
+  #       (same 62 sub-folders)
+  sd19_train_dir: ./data/SD19/by_class
+  sd19_val_dir:   ./data/SD19/by_class
+  batch_size:     256          # GPU memory driven; paper used 256
+  num_workers:    4            # tune for your CPU
+  image_size:     28
+
+# -------------------------------------------------------------------
+# PRETRAINING PHASE
+# -------------------------------------------------------------------
+pretraining:
+  # Digits 0–9 (paper pre-trains on all digits)
+  classes_pretraining: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+# -------------------------------------------------------------------
+# INCREMENTAL LEARNING (INTRINSIC REPLAY) PHASE
+# -------------------------------------------------------------------
+ir:
+  # Optional manual class order.
+  # Leave null ⬇ to let the script build [A..Z, a..z] automatically.
+  class_sequence: null
+
+# -------------------------------------------------------------------
+# MODEL
+# -------------------------------------------------------------------
+model:
+  hidden_sizes:         [1000, 500, 250, 50]   # 8-layer AE → 50-dim bottleneck
+  activation:           leaky_relu
+  activation_latent:    identity   # bottleneck layer
+  activation_last:      sigmoid  # output layer
+
+# -------------------------------------------------------------------
+# NEUROGENESIS & TRAINING HYPER-PARAMETERS
+# -------------------------------------------------------------------
+neurogenesis:
+  thresholds:            null        # computed after pretraining (mean + 3·std)
+  max_nodes:             [10000, 5000, 3000, 1000]         # per layer cap
+  max_outliers:          5          # samples used for plasticity step
+  base_lr:               0.001
+  plasticity_epochs_max: 10
+  stability_epochs:      50
+  next_layer_epochs:     50
+  factor_new_nodes:      0.30        # proportion of new neurons allowed/layer
+
+trainer:
+  log_every_n_steps:     10
+  checkpoint_each_class: false       # set true to save AE after each new class
+  load_model_path:       model_nistsd19_pretrained.pt
+  mean_layer_losses:    [0.5016461610794067, 0.10309366881847382, 0.0790928304195404, 0.0029423972591757774]
+  max_layer_losses:     [0.8067780137062073, 0.4993308484554291, 0.19111187756061554, 0.053901299834251404]
+  std_layer_losses:     [0.11316186189651489, 0.05626406520605087, 0.02418588660657406, 0.0022181652020663023]
+  early_cfg:            {"min_delta": 0.002, "patience": 1, "mode": "min"}
+
+
+# -------------------------------------------------------------------
+# MLFLOW LOGGING
+# -------------------------------------------------------------------
+mlflow:
+  experiment_name: sd19_neurogenesis
+  tracking_uri:   http://localhost:5000

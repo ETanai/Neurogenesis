@@ -1,6 +1,6 @@
 from copy import deepcopy
 from functools import partial
-from typing import List, Optional
+from typing import Callable, Dict, List, Optional
 
 import torch
 import torch.nn.functional as F
@@ -16,6 +16,32 @@ _ACTS: dict[str, type[nn.Module]] = {
     "sigmoid": nn.Sigmoid,
     "identity": lambda: nn.Identity(),
 }
+
+
+class EarlyStopper:
+    def __init__(self, min_delta: float = 0.0, patience: int = 1, mode: str = "min"):
+        assert mode in {"min", "max"}
+        self.min_delta = min_delta
+        self.patience = patience
+        self.mode = mode
+        self.best = float("inf") if mode == "min" else -float("inf")
+        self.bad_epochs = 0
+        self.should_stop = False
+
+    def step(self, current: float):
+        improved = (
+            (current < self.best - self.min_delta)
+            if self.mode == "min"
+            else (current > self.best + self.min_delta)
+        )
+        if improved:
+            self.best = current
+            self.bad_epochs = 0
+        else:
+            self.bad_epochs += 1
+            if self.bad_epochs >= self.patience:
+                self.should_stop = True
+        return self.should_stop
 
 
 class NGAutoEncoder(nn.Module):
@@ -293,23 +319,45 @@ class NGAutoEncoder(nn.Module):
 
         return AdamW(param_groups)
 
-    def plasticity_phase(self, loader, level: int, epochs: int, lr: float):
+    def plasticity_phase(
+        self,
+        loader,
+        level: int,
+        epochs: int,
+        lr: float,
+        early_stop_cfg: Optional[dict] = None,
+        forward_fn: Optional[Callable[[Tensor], Tensor]] = None,
+    ):
         opt = self._optim_plasticity(level, lr)
-        self._run_epoch_loop(loader, opt, epochs)
+        es = EarlyStopper(**early_stop_cfg) if early_stop_cfg else None
+        return self._run_epoch_loop(loader, opt, epochs, early_stopper=es, forward_fn=forward_fn)
 
     def stability_phase(
-        self, loader, level: int, lr: float, epochs: int, old_x: torch.Tensor | None
+        self,
+        loader,
+        level: int,
+        lr: float,
+        epochs: int,
+        old_x: Optional[torch.Tensor],
+        early_stop_cfg: Optional[dict] = None,
+        forward_fn: Optional[Callable[[Tensor], Tensor]] = None,
     ):
         opt = self._optim_stability(level, lr)
-        self._run_epoch_loop(loader, opt, epochs, replay=old_x)
+        es = EarlyStopper(**early_stop_cfg) if early_stop_cfg else None
+        return self._run_epoch_loop(
+            loader, opt, epochs, replay=old_x, early_stopper=es, forward_fn=forward_fn
+        )
 
     def _run_epoch_loop(
         self,
         loader: torch.utils.data.DataLoader,
         optim: torch.optim.Optimizer,
         epochs: int,
-        replay: torch.Tensor | None = None,
-    ) -> None:
+        replay: Optional[torch.Tensor] = None,
+        *,
+        early_stopper: Optional[EarlyStopper] = None,
+        forward_fn: Optional[Callable[[Tensor], Tensor]] = None,
+    ) -> Dict[str, list[float]]:
         """
         Generic train loop:
         • one forward/backward per batch
@@ -318,7 +366,9 @@ class NGAutoEncoder(nn.Module):
         device = next(self.parameters()).device
         self.train()
 
-        for _ in range(epochs):
+        history = {"epoch_loss": []}
+        for epoch in range(epochs):
+            batch_losses = []
             for batch in loader:
                 x = batch[0].to(device, non_blocking=True)
 
@@ -331,12 +381,22 @@ class NGAutoEncoder(nn.Module):
                     x = torch.cat([x, replay[idx].view([k, 1, 28, 28])], dim=0)
 
                 optim.zero_grad(set_to_none=True)
-                x_hat = self.forward(x)
-                if isinstance(x_hat, dict):
-                    x_hat = x_hat["recon"]
+                if forward_fn is None:
+                    out = self.forward(x)
+                    x_hat = out["recon"] if isinstance(out, dict) else out
+                else:
+                    x_hat = forward_fn(x)
                 loss = self.reconstruction_error(x_hat, x).mean()
                 loss.backward()
                 optim.step()
+                batch_losses.append(loss.item())
+
+            epoch_loss = float(torch.tensor(batch_losses).mean())
+            history["epoch_loss"].append(epoch_loss)
+
+            if early_stopper and early_stopper.step(epoch_loss):
+                break
+        return history
 
     def _plastic_to_mature(self):
         for module in self.encoder:

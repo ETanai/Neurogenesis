@@ -1,0 +1,13 @@
+defaults:
+  - model: ae
+  - datamodule: mnist
+
+trainer:
+  max_epochs: 3
+  accelerator: auto        # cpu or gpu picked automatically
+  log_every_n_steps: 20
+ir:
+  enabled: true
+  n_samples_per_class: 16
+mlflow:
+  tracking_uri: "http://localhost:5000"
