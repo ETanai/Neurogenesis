@@ -32,6 +32,7 @@ class NeurogenesisTrainer:
         factor_new_nodes: float = 0.1,
         logger: MLFlowLogger = None,
         mean_layer_losses=None,
+        early_stop_cfg: dict = None,
     ):
         self.ae = ae
         self.ir = ir
@@ -43,6 +44,7 @@ class NeurogenesisTrainer:
         self.factor_max_new_nodes = factor_max_new_nodes
         self.factor_new_nodes = factor_new_nodes
         self.mean_layer_losses = mean_layer_losses
+        self.early_stop_cfg = early_stop_cfg
 
         # counter for how many classes we've learned so far
         self._class_count = 0
@@ -126,6 +128,13 @@ class NeurogenesisTrainer:
             pin_memory=loader.pin_memory,
         )
 
+    def log_global_sizes(self):
+        if self.logger:
+            global_metrics = {
+                f"global_level_{i}_size": sz for i, sz in enumerate(self.ae.hidden_sizes)
+            }
+            self.logger.log_metrics(global_metrics, step=self._class_count)
+
     def learn_class(self, class_id: Any, loader: DataLoader) -> None:
         num_layers = len(self.ae.hidden_sizes)
         self.history[class_id] = {"layer_errors": [[] for _ in range(num_layers)]}
@@ -180,88 +189,59 @@ class NeurogenesisTrainer:
                 # Plasticity phase (epochs)
 
                 last_loss = 1
-                for epoch in tqdm(
-                    range(self.plasticity_epochs), desc="   Plasticity", unit="ep", leave=False
-                ):
-                    losses_plasticety = []
-                    losses_stability = []
-                    for i_b, batch in enumerate(outliers_loader):
-                        x = batch[0].to(device, non_blocking=True)
-                        opt = self.ae._optim_plasticity(level, self.base_lr)
-                        opt.zero_grad(set_to_none=True)
-                        x_hat = self.ae.forward_partial(x, level)
-                        if isinstance(x_hat, dict):
-                            x_hat = x_hat["recon"]
-                        loss = self.ae.reconstruction_error(x_hat, x).mean()
-                        losses_plasticety.append(loss.item())
-                        loss.backward()
-                        opt.step()
 
-                    delat_loss = last_loss - torch.tensor(losses_plasticety).mean()
+                # Optimizer is created inside plasticity_phase, so call it once per growth round
+                hist = self.ae.plasticity_phase(
+                    loader=outliers_loader,
+                    level=level,
+                    epochs=self.plasticity_epochs,
+                    lr=self.base_lr,
+                    early_stop_cfg=self.early_stop_cfg,
+                    forward_fn=lambda x: self.ae.forward_partial(x, level),  # partial forward
+                )
 
-                    if self.logger:
-                        self.logger.log_metrics(
-                            {
-                                f"class_{class_id}_level_{level}_loss_plasticety": sum(
-                                    losses_plasticety
-                                )
-                                / len(losses_plasticety),
-                                f"class_{class_id}_level_{level}_delta_loss_plasticety": delat_loss,
-                            },
-                            step_plasticety,
-                        )
-                    step_plasticety += 1
-                    # if (
-                    #     torch.tensor(losses_plasticety).mean()
-                    #     <= self.mean_layer_losses[level] * 0.8
-                    # ):
-                    #     break
+                mean_loss = hist["epoch_loss"][-1]
+                delta_loss = last_loss - mean_loss if last_loss is not None else float("inf")
 
-                    if delat_loss <= 0.002:
-                        break
-
-                    last_loss = torch.tensor(losses_plasticety).mean()
+                if self.logger:
+                    self.logger.log_metrics(
+                        {
+                            f"class_{class_id}_level_{level}_loss_plasticity": mean_loss,
+                            f"class_{class_id}_level_{level}_delta_loss_plasticity": delta_loss,
+                        },
+                        step_plasticety,
+                    )
+                step_plasticety += 1
+                last_loss = mean_loss
                 # Stability phase (epochs)
                 last_loss = 1
-                for epoch in tqdm(
-                    range(self.stability_epochs), desc="   Stability", unit="ep", leave=False
-                ):
-                    for batch in outliers_loader:
-                        x = batch[0].to(device, non_blocking=True)
-                        if old_x is not None:
-                            k = x.size(0)
-                            idx = torch.randint(0, old_x.size(0), (k,), device=device)
-                            x = torch.cat([x, old_x[idx].view([k, 1, 28, 28])], dim=0)
-                        opt = self.ae._optim_stability(
-                            int(len(self.ae.encoder) / 2) - 1, self.base_lr
-                        )
-                        opt.zero_grad(set_to_none=True)
-                        x_hat = self.ae(x)
-                        if isinstance(x_hat, dict):
-                            x_hat = x_hat["recon"]
-                        loss = self.ae.reconstruction_error(x_hat, x).mean()
-                        losses_stability.append(loss)
-                        loss.backward()
-                        opt.step()
-                    new_loss = torch.tensor(losses_stability).mean()
-                    delta_loss = last_loss - new_loss
-                    last_loss = new_loss
-                    if self.logger:
-                        self.logger.log_metrics(
-                            {
-                                f"class_{class_id}_level_{level}_loss_stability": sum(
-                                    losses_stability
-                                )
-                                / len(losses_stability),
-                                f"class_{class_id}_level_{level}_delta_loss_stability": delta_loss,
-                            },
-                            step_stability,
-                        )
-                    step_stability += 1
-                    # if torch.tensor(losses_stability).mean() <= self.mean_layer_losses[level] * 0.8:
-                    #     break
-                    # if delta_loss <= 0.0007:
-                    #     break
+                hist = self.ae.stability_phase(
+                    loader=outliers_loader,
+                    level=int(len(self.ae.encoder) / 2) - 1,  # same level you used before
+                    lr=self.base_lr,
+                    epochs=self.stability_epochs,
+                    old_x=old_x,  # replay tensor
+                    early_stop_cfg=self.early_stop_cfg,
+                    # no forward_fn → full forward pass is used
+                )
+
+                mean_loss = hist["epoch_loss"][-1]
+                delta_loss = last_loss - mean_loss if last_loss is not None else float("inf")
+
+                if self.logger:
+                    self.logger.log_metrics(
+                        {
+                            f"class_{class_id}_level_{level}_loss_stability": mean_loss,
+                            f"class_{class_id}_level_{level}_delta_loss_stability": delta_loss,
+                        },
+                        step_stability,
+                    )
+                step_stability += 1
+                last_loss = mean_loss
+                # if torch.tensor(losses_stability).mean() <= self.mean_layer_losses[level] * 0.8:
+                #     break
+                # if delta_loss <= 0.0007:
+                #     break
 
                 # recompute errors & log
                 errs = self._get_recon_errors(loader, level)
@@ -285,9 +265,13 @@ class NeurogenesisTrainer:
             pbar_growth.close()
 
             # Next-layer plasticity & stability
-            if level + 1 < num_layers:
+            if level + 1 < num_layers and step_plasticety > 0:
                 self.ae.plasticity_phase(
-                    loader, level + 1, epochs=self.next_layer_epochs, lr=self.base_lr / 100
+                    loader,
+                    level + 1,
+                    epochs=self.next_layer_epochs,
+                    lr=self.base_lr / 100,
+                    early_stop_cfg=self.early_stop_cfg,
                 )
                 self.ae.stability_phase(
                     loader,
@@ -295,6 +279,7 @@ class NeurogenesisTrainer:
                     lr=self.base_lr / 100,
                     epochs=self.stability_epochs,
                     old_x=old_x,
+                    early_stop_cfg=self.early_stop_cfg,
                 )
 
             if self.logger:
@@ -306,11 +291,7 @@ class NeurogenesisTrainer:
             pbar_levels.update(1)
         pbar_levels.close()
 
-        if self.logger:
-            global_metrics = {
-                f"global_level_{i}_size": sz for i, sz in enumerate(self.ae.hidden_sizes)
-            }
-            self.logger.log_metrics(global_metrics, step=self._class_count)
+        self.log_global_sizes()
 
     def test_all_levels(self, loader: DataLoader) -> List[float]:
         """

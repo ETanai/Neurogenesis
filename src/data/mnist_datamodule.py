@@ -1,4 +1,4 @@
-from typing import Any, Sequence
+from typing import Any, Sequence, Tuple, Union
 
 import pytorch_lightning as pl
 import torch
@@ -129,3 +129,176 @@ class MNISTDataModule(pl.LightningDataModule):
         mask = torch.isin(t, cls)
         idxs = mask.nonzero(as_tuple=True)[0].tolist()
         return Subset(self.full_train, idxs)
+
+    def make_class_balanced_batch(
+        self,
+        classes: Sequence[int],
+        samples_per_class: int,
+        *,
+        split: str = "train",  # "train" or "val"
+        device: torch.device | None = None,  # defaults to self.hparams.device
+        shuffle: bool = True,
+        seed: int | None = None,
+        allow_replacement: bool = False,
+        return_labels: bool = True,
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor, list[int]]]:
+        """
+        Build a batch with equal #samples per class, ordered by the 'classes' list.
+
+        Returns:
+            x:  Tensor [B, C, H, W] on the chosen device
+            y:  (optional) LongTensor [B] of labels on same device
+            splits: cumulative column counts after each class block
+                    (useful for plot_partial_recon_grid_mlflow col_group_splits)
+
+        Example:
+            x, y, splits = dm.make_class_balanced_batch([4,6,8], 8)
+            fig = plot_partial_recon_grid_mlflow(
+                ae, x, view_shape=(1,28,28),
+                ncols=x.size(0),
+                col_group_titles=[str(c) for c in [4,6,8]],
+                col_group_splits=splits,
+            )
+        """
+        assert split in {"train", "val"}
+        ds = self.full_train if split == "train" else self.full_val
+        targets = ds.targets
+        dev = device if device is not None else self.hparams.device
+
+        # local RNG for reproducibility (optional)
+        g = None
+        if seed is not None:
+            g = torch.Generator()
+            g.manual_seed(int(seed))
+
+        imgs: list[torch.Tensor] = []
+        labels: list[int] = []
+        splits: list[int] = []
+        total = 0
+
+        # lazy import in case PIL images are returned
+        try:
+            from torchvision.transforms.functional import to_tensor as _to_tensor
+        except Exception:
+            _to_tensor = None  # dataset is expected to return tensors
+
+        for c in classes:
+            idxs = (targets == int(c)).nonzero(as_tuple=True)[0]
+            n_avail = idxs.numel()
+            if n_avail == 0:
+                raise ValueError(f"No samples found for class {c} in split='{split}'.")
+
+            if samples_per_class > n_avail and not allow_replacement:
+                raise ValueError(
+                    f"Requested {samples_per_class} samples for class {c}, "
+                    f"but only {n_avail} available. "
+                    f"Set allow_replacement=True to sample with replacement."
+                )
+
+            if samples_per_class <= n_avail:
+                if shuffle:
+                    perm = (
+                        torch.randperm(n_avail, generator=g)
+                        if g is not None
+                        else torch.randperm(n_avail)
+                    )
+                    chosen = idxs[perm[:samples_per_class]]
+                else:
+                    chosen = idxs[:samples_per_class]
+            else:
+                # sample with replacement
+                draw = torch.randint(0, n_avail, (samples_per_class,), generator=g)
+                chosen = idxs[draw]
+
+            for idx in chosen.tolist():
+                x_i, y_i = ds[idx]
+                # Convert to tensor if needed
+                if not isinstance(x_i, torch.Tensor):
+                    if _to_tensor is None:
+                        raise TypeError(
+                            "Dataset returned a non-tensor image and torchvision is unavailable."
+                        )
+                    x_i = _to_tensor(x_i)
+                x_i = x_i.float()
+                # Ensure channel dim exists: [C,H,W]
+                if x_i.ndim == 2:
+                    x_i = x_i.unsqueeze(0)
+                # Normalize 0..255 -> 0..1 if needed
+                if x_i.max() > 1.0:
+                    x_i = x_i / 255.0
+
+                imgs.append(x_i)
+                labels.append(int(y_i))
+
+            total += samples_per_class
+            splits.append(total)
+
+        x_batch = torch.stack(imgs, dim=0).to(dev, non_blocking=True)
+        if return_labels:
+            y_batch = torch.as_tensor(labels, dtype=torch.long, device=dev)
+            return x_batch, y_batch, splits
+        return x_batch
+
+    def _add_gap_column(
+        self, x: torch.Tensor, gap_after: int, gap_value: float = 1.0
+    ) -> torch.Tensor:
+        """
+        Insert a single blank column (all gap_value) after `gap_after` images.
+        Keeps shape [B, C, H, W]. Returns expanded tensor.
+        """
+        if gap_after <= 0 or gap_after >= x.size(0):
+            return x
+        C, H, W = x.shape[1:]
+        gap = torch.full((1, C, H, W), gap_value, device=x.device, dtype=x.dtype)
+        return torch.cat([x[:gap_after], gap, x[gap_after:]], dim=0)
+
+    def make_grouped_batch_for_partial_plot(
+        self,
+        pretrained_classes: Sequence[int],
+        novel_classes: Sequence[int],
+        samples_per_class: int,
+        *,
+        split: str = "train",
+        device: torch.device | None = None,
+        shuffle: bool = True,
+        seed: int | None = None,
+        add_gap: bool = True,  # insert a visible blank column between groups
+        gap_value: float = 1.0,  # 1.0 -> white gap for MNIST in [0,1]
+    ):
+        """
+        Build a batch ordered as [pretrained..., novel...], plus group titles/splits
+        for plot_partial_recon_grid_mlflow(...).
+
+        Returns:
+            x: Tensor [B or B+1, C, H, W]
+            y: LongTensor [B] (labels; note: no label for the gap column)
+            titles: ["Pre-trained", "Novel"]
+            splits: [end_of_pretrained, total_cols]  # group-level cumulative ends
+        """
+        # use existing balanced-batch method to keep behavior consistent
+        classes = list(pretrained_classes) + list(novel_classes)
+        out = self.make_class_balanced_batch(
+            classes,
+            samples_per_class,
+            split=split,
+            device=device,
+            shuffle=shuffle,
+            seed=seed,
+            allow_replacement=False,
+            return_labels=True,
+        )
+        x, y, _ = out  # ignore per-class splits
+
+        # compute group-level split
+        n_pre_cols = samples_per_class * len(pretrained_classes)
+        titles = ["Pre-trained", "Novel"]
+
+        if add_gap:
+            # insert a blank column to visually separate groups
+            x = self._add_gap_column(x, n_pre_cols, gap_value=gap_value)
+            # we don't add a label for the gap column; plotting doesn't use labels
+            splits = [n_pre_cols, x.size(0)]
+        else:
+            splits = [n_pre_cols, x.size(0)]
+
+        return x, y, titles, splits
