@@ -1,0 +1,41 @@
+trainer:
+  max_epochs: 3
+  accelerator: gpu
+  log_every_n_steps: 20
+
+datamodule:
+  data_dir: "./data"
+  batch_size: 64
+  num_workers: 4
+  cls_pretraining: [1,7]
+
+model:
+  hidden_sizes: [200, 100, 60, 20]
+  activation: leaky_relu
+  activation_latent: identity
+  activation_last: sigmoid
+
+neurogenesis:
+  thresholds: [0.05, 0.05, 0.05, 0.05]
+  max_nodes: [1000, 8000, 500, 200]
+  max_outliers: 5
+  base_lr: 1e-3
+  plasticity_epochs_max: 500
+  stability_epochs: 10
+  next_layer_epochs: 1
+  factor_thr: 1.5
+  factor_max_new_nodes: 0.02
+  factor_new_nodes: 0.01
+
+
+
+pretraining:
+  classes_pretraining: [1,7]
+
+ir:
+  enabled: true
+  class_sequence: [0,2,3,4,5,6,8,9]
+
+mlflow:
+  tracking_uri: "http://localhost:5000"
+  experiment_name: "neurogenesis_tutorial"

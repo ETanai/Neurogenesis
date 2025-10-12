@@ -1,0 +1,7 @@
+thresholds:    [0.05, 0.05, 0.05, 0.05]
+max_nodes:     [30, 20, 10, 5]
+max_outliers:  0.05
+base_lr:       1e-3
+plasticity_epochs:    5
+stability_epochs:     2
+next_layer_epochs:    1
