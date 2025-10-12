@@ -7,7 +7,7 @@ from pytorch_lightning.loggers import MLFlowLogger
 from data.mnist_datamodule import MNISTDataModule
 from training.neurogenesis_lightning_module import NeurogenesisLightningModule
 from training.neurogenesis_trainer import NeurogenesisTrainer
-from utils.viz_utils import plot_recon_error_history, plot_recon_grid
+from utils.viz_utils import plot_partial_recon_grid_mlflow
 
 if __name__ == "__main__":
     cfg = OmegaConf.load("C:/Users/Admin/Documents/GitHub/Neurogenesis/config/notebook_config.yaml")
@@ -70,8 +70,45 @@ if __name__ == "__main__":
     # Extract the pretrained AE & IR
     ae = model.ae
     ir = model.ir
-
     ae.to(device)
+
+    x_batch, y, titles, splits = dm.make_grouped_batch_for_partial_plot(
+        pretrained_classes=[1, 7],
+        novel_classes=[0, 2, 3, 4, 5, 6, 8, 9],
+        samples_per_class=2,
+        seed=0,
+        add_gap=True,  # clear visual separation
+    )
+
+    levels = [3]
+    fig, png = plot_partial_recon_grid_mlflow(
+        ae,
+        x_batch,
+        view_shape=(1, 28, 28),
+        levels=levels,  #  # or e.g. [0, 1, 2, 3]
+        ncols=x_batch.size(0),
+        col_group_titles=titles,
+        col_group_splits=splits,
+        return_mlflow_artifact=True,
+        artifact_name="partial_reconstructions.png",
+    )
+
+    mlf = logger.experiment  # MLflow client/module
+    cols = min(24, x_batch.size(0))  # take first 24 incl. gap if within first block
+    fig, _ = plot_partial_recon_grid_mlflow(
+        ae,
+        x_batch,
+        view_shape=(1, 28, 28),
+        ncols=cols,  # <-- fewer columns
+        figsize=(cols * 0.6, (1 + len(levels)) * 1.2),
+        col_group_titles=titles,
+        col_group_splits=splits,  # function clamps splits to <= ncols
+        return_mlflow_artifact=True,
+    )
+
+    client = logger.experiment
+    client.log_figure(logger.run_id, fig, "figures/partial_recons.png")
+    mlf.log_figure(logger.run_id, fig, "figures/partial_recons.png")  # -> MLflow artifact
 
     # Build the NeurogenesisTrainer with the same hyperparams
     trainer_ng = NeurogenesisTrainer(
@@ -103,17 +140,18 @@ if __name__ == "__main__":
     for i, t in enumerate(threshoulds):
         trainer_ng.logger.log_metrics({"threshoulds": t}, i)
 
-    # Grow network one class at a time
+    # Grow network one class at a
+    trainer_ng.log_global_sizes()
     for cls in cfg.ir.class_sequence:
         loader = dm.get_class_dataloader(cls)
         trainer_ng.learn_class(class_id=cls, loader=loader)
 
         # Report and visualize growth
         print(f"After class {cls}, hidden sizes = {ae.hidden_sizes}")
-        fig = plot_recon_error_history(trainer_ng, cls)
-        fig.show()
+        # fig = plot_recon_error_history(trainer_ng, cls)
+        # fig.show()
 
-        # Optional: show reconstructions for a batch
-        batch = next(iter(loader))[0]
-        grid = plot_recon_grid(ae, batch, view_shape=(1, 28, 28))
-        grid.show()
+        # # Optional: show reconstructions for a batch
+        # batch = next(iter(loader))[0]
+        # grid = plot_recon_grid(ae, batch, view_shape=(1, 28, 28))
+        # grid.show()
