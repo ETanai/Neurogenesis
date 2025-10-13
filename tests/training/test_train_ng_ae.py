@@ -3,6 +3,7 @@ import pytorch_lightning as pl
 import torch
 from omegaconf import OmegaConf
 from pytorch_lightning.loggers import MLFlowLogger
+from pytorch_lightning.loggers.mlflow import _MLFLOW_AVAILABLE
 
 from training.train_ng_ae import build_mlflow_logger
 
@@ -72,6 +73,7 @@ def mlflow_cfg():
     return OmegaConf.create({"mlflow": {"experiment_name": "exp", "tracking_uri": "uri"}})
 
 
+@pytest.mark.skipif(not _MLFLOW_AVAILABLE, reason="mlflow not installed")
 def test_build_mlflow_logger(mlflow_cfg):
     logger = build_mlflow_logger(mlflow_cfg)
     assert isinstance(logger, MLFlowLogger)

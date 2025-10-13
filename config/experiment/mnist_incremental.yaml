@@ -1,0 +1,11 @@
+dataset: mnist
+regime: ndl_ir
+base_classes: [1, 7]
+incremental_classes: [0, 2, 3, 4, 5, 6, 8, 9]
+threshold:
+  percentile: 0.95
+  margin: 0.0
+  minimum: 1.0e-04
+evaluation:
+  batch_size: null
+  val_split: true

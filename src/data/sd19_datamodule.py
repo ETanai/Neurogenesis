@@ -285,9 +285,8 @@ class SD19DataModule(pl.LightningDataModule):
                 perm = torch.randperm(len(lst), generator=g).tolist()
                 lst = [lst[j] for j in perm]
             lst = lst[:limit]
-        ds = SD19ImageFolder(
-            self.hparams.data_dir, transform=self.val_tfms if use_val_transforms else None
-        )
+        transform = self.val_tfms if use_val_transforms else self.train_tfms
+        ds = SD19ImageFolder(self.hparams.data_dir, transform=transform)
         return Subset(ds, lst)
 
     def get_combined_dataset(
@@ -302,9 +301,8 @@ class SD19DataModule(pl.LightningDataModule):
         idxs = self._select_indices_for_classes(
             class_ids, per_class_limit=per_class_limit, max_total=max_total, seed=seed
         )
-        ds = SD19ImageFolder(
-            self.hparams.data_dir, transform=self.val_tfms if use_val_transforms else None
-        )
+        transform = self.val_tfms if use_val_transforms else self.train_tfms
+        ds = SD19ImageFolder(self.hparams.data_dir, transform=transform)
         return Subset(ds, idxs)
 
     # ---------- transforms ----------

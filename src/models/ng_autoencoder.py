@@ -371,6 +371,7 @@ class NGAutoEncoder(nn.Module):
             batch_losses = []
             for batch in loader:
                 x = batch[0].to(device, non_blocking=True)
+                x = x.view(x.size(0), -1)
 
                 # concatenate intrinsic-replay batch if provided
                 if replay is not None:
@@ -378,7 +379,9 @@ class NGAutoEncoder(nn.Module):
                     k = x.size(0)
 
                     idx = torch.randint(0, replay.size(0), (k,), device=device)
-                    x = torch.cat([x, replay[idx].view([k, 1, 28, 28])], dim=0)
+                    replay_batch = replay[idx].to(device)
+                    replay_batch = replay_batch.view(k, -1)
+                    x = torch.cat([x, replay_batch], dim=0)
 
                 optim.zero_grad(set_to_none=True)
                 if forward_fn is None:

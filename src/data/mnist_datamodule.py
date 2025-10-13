@@ -118,17 +118,19 @@ class MNISTDataModule(pl.LightningDataModule):
         self.train_sampler.set(idxs)
         return self._train_loader
 
-    def get_class_dataset(self, class_id: int) -> Subset:
-        t = self.full_train.targets
+    def get_class_dataset(self, class_id: int, *, split: str = "train") -> Subset:
+        ds = self.full_train if split == "train" else self.full_val
+        t = ds.targets
         idxs = (t == class_id).nonzero(as_tuple=True)[0].tolist()
-        return Subset(self.full_train, idxs)
+        return Subset(ds, idxs)
 
-    def get_combined_dataset(self, class_ids: Sequence[int]) -> Subset:
+    def get_combined_dataset(self, class_ids: Sequence[int], *, split: str = "train") -> Subset:
+        ds = self.full_train if split == "train" else self.full_val
         cls = torch.as_tensor(list(class_ids))
-        t = self.full_train.targets
+        t = ds.targets
         mask = torch.isin(t, cls)
         idxs = mask.nonzero(as_tuple=True)[0].tolist()
-        return Subset(self.full_train, idxs)
+        return Subset(ds, idxs)
 
     def make_class_balanced_batch(
         self,

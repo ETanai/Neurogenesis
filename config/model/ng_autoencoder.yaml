@@ -1,0 +1,5 @@
+input_dim: 784
+hidden_sizes: [200, 100, 60, 20]
+activation: relu
+activation_latent: identity
+activation_last: sigmoid

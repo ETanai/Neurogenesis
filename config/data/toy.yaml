@@ -1,0 +1,9 @@
+name: toy
+batch_size: 16
+num_workers: 0
+data_dir: null
+num_classes: 4
+train_samples_per_class: 32
+val_samples_per_class: 16
+noise_scale: 0.05
+seed: 123
