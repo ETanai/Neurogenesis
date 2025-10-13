@@ -1,0 +1,10 @@
+defaults:
+  - data: mnist
+  - model: ng_autoencoder
+  - experiment: mnist_incremental
+  - training: default
+  - neurogenesis: default
+  - replay: default
+  - logging: default
+
+seed: 42

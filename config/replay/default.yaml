@@ -1,0 +1,4 @@
+enabled: true
+cov_eps: 1.0e-6
+stats_batch_size: 256
+batch_ratio: 1.0

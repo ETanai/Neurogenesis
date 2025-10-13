@@ -57,19 +57,28 @@ class NeurogenesisTrainer:
         # History: class_id -> {'layer_errors': List[List[Tensor]]}
         self.history: dict[Any, dict[str, List[List[Tensor]]]] = {}
 
+    def _model_device(self) -> torch.device:
+        params = getattr(self.ae, "parameters", None)
+        if params is None:
+            return torch.device("cpu")
+        first = next(params(), None)
+        if first is None:
+            return torch.device("cpu")
+        return first.device
+
     def _get_recon_errors(self, loader: DataLoader, level: int) -> Tensor:
         """
         Compute reconstruction errors at specified encoder level for all samples in loader.
         """
         errors = []
         for batch in loader:
-            x = batch[0].to(next(self.ae.parameters()).device)
+            x = batch[0].to(self._model_device())
             x_hat = self.ae.forward_partial(x, level)
             errors.append(self.ae.reconstruction_error(x_hat, x))
         return torch.cat(errors)
 
     def _get_outliers(self, loader: DataLoader, level: int):
-        device = next(self.ae.parameters()).device
+        device = self._model_device()
 
         # 1) Collect all per-sample errors into a single flat Tensor
         errors = []
@@ -111,7 +120,8 @@ class NeurogenesisTrainer:
             num_workers=loader.num_workers,
             pin_memory=loader.pin_memory,
         )
-        return n_outliers, outlier_loader
+        total = int(errors.numel())
+        return n_outliers, outlier_loader, total
 
     def _limit_loader(self, loader: DataLoader, n_samples: int) -> DataLoader:
         """
@@ -144,22 +154,32 @@ class NeurogenesisTrainer:
         if self.logger:
             self.logger.log_metrics({"classes_learned": self._class_count}, step=self._class_count)
 
-        # Fit IR stats
-        self.ir.fit(loader)
-        device = next(self.ae.parameters()).device
+        # Fit IR stats for the incoming class
+        if self.ir is not None:
+            self.ir.fit(loader)
+        device = self._model_device()
         old_x = None
-        if self.ir is not None and class_id is not None and len(loader) > 0:
-            old_x = self.ir.sample_images(class_id, len(loader)).to(device)
+        dataset_size = len(loader.dataset)
+        if (
+            self.ir is not None
+            and self.ir.available_classes()
+            and dataset_size > 0
+        ):
+            old_x = self.ir.sample_images(None, dataset_size).to(device)
 
         pbar_levels = tqdm(range(num_layers), desc=f"[Class {class_id}] Layers", unit="lvl")
         for level in pbar_levels:
             added = 0
             self.ae._plastic_to_mature()
             n_plastic_neurons = 0
-            n_outliers, outliers_loader = self._get_outliers(loader, level)
+            n_outliers, outliers_loader, total_seen = self._get_outliers(loader, level)
+            fraction = n_outliers / max(total_seen, 1)
             if self.logger:
                 self.logger.log_metrics(
-                    {f"class_{class_id}_level_{level}_n_outliers": n_outliers},
+                    {
+                        f"class_{class_id}_level_{level}_n_outliers": n_outliers,
+                        f"class_{class_id}_level_{level}_outlier_fraction": fraction,
+                    },
                     step=added,
                 )
 
@@ -172,7 +192,7 @@ class NeurogenesisTrainer:
             step_stability = 0
 
             for i_growth in pbar_growth:
-                if not (n_outliers > self.max_outliers and added < max_rounds):
+                if not (fraction > self.max_outliers and added < max_rounds):
                     break
 
                 num_new = int(math.ceil(self.factor_new_nodes * n_outliers))
@@ -253,10 +273,14 @@ class NeurogenesisTrainer:
                     )
 
                 added += 1
-                n_outliers, outliers_loader = self._get_outliers(loader, level)
+                n_outliers, outliers_loader, total_seen = self._get_outliers(loader, level)
+                fraction = n_outliers / max(total_seen, 1)
                 if self.logger:
                     self.logger.log_metrics(
-                        {f"class_{class_id}_level_{level}_n_outliers": n_outliers},
+                        {
+                            f"class_{class_id}_level_{level}_n_outliers": n_outliers,
+                            f"class_{class_id}_level_{level}_outlier_fraction": fraction,
+                        },
                         step=added,
                     )
 
@@ -292,6 +316,10 @@ class NeurogenesisTrainer:
         pbar_levels.close()
 
         self.log_global_sizes()
+
+        # Refresh replay statistics with the now-updated encoder
+        if self.ir is not None:
+            self.ir.fit(loader)
 
     def test_all_levels(self, loader: DataLoader) -> List[float]:
         """
