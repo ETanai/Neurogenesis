@@ -1,0 +1,20 @@
+# 1. Ignore all files
+*
+
+# 2. Un-ignore all directories so Git can recurse
+!*/
+!*/config/*
+
+# 3. Un-ignore any .py files
+!*.py
+!*.toml
+
+!*/ae.yaml
+!*/ng_autoencoder.yaml
+!*/config.yaml
+!*/neurogenesis.yaml
+!*/notebook_config_sd19.yaml
+!*/notebook_config.yaml
+!*/mnist.yaml
+!environment.yml
+!.gitignore
