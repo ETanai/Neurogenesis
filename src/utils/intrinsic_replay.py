@@ -29,10 +29,11 @@ class IntrinsicReplay:
             eps: small diagonal noise to make covariance PD
             device: where to accumulate / sample (defaults to encoder device)
         """
-        self.encoder = encoder.eval().to(device)
-        self.decoder = decoder.eval().to(device)
+        # Establish device first, then move submodules consistently.
         self.eps = eps
         self.device = device or (torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+        self.encoder = encoder.eval().to(self.device)
+        self.decoder = decoder.eval().to(self.device)
 
         # Will hold per-class: {"class_id": {"mean": (d,), "L": (d,d)}}
         self.stats: Dict[int, Dict[str, torch.Tensor]] = {}
@@ -48,25 +49,26 @@ class IntrinsicReplay:
         accum: Dict[int, list[torch.Tensor]] = {}
 
         for imgs, labels in dataloader:
-            imgs = imgs.to(self.device)
+            imgs = imgs.to(self.device, non_blocking=True)
             inputs = imgs.view(imgs.shape[0], self.encoder[0].in_features)
-            latents = self.encoder(inputs)  # (B, D)
+            latents = self.encoder(inputs)  # (B, D) on self.device
             for z, y in zip(latents, labels.tolist()):
                 if class_filter is not None and y not in class_filter:
                     continue
-                accum.setdefault(int(y), []).append(z.cpu())
+                # Keep tensors on the target device for consistent math
+                accum.setdefault(int(y), []).append(z)
 
         for cls, z_list in accum.items():
-            Z = torch.stack(z_list, dim=0)  # (N_cls, D)
+            Z = torch.stack(z_list, dim=0)  # (N_cls, D) on self.device
             mu = Z.mean(dim=0)  # (D,)
             # unbiased covariance: (Z - mu).T @ (Z - mu) / (N-1)
             Zc = Z - mu
             if Zc.size(0) > 1:
                 cov = (Zc.T @ Zc) / (Zc.size(0) - 1)
             else:
-                cov = torch.zeros((Zc.size(1), Zc.size(1)), device=self.device)
+                cov = torch.zeros((Zc.size(1), Zc.size(1)), device=Z.device)
             # make PD
-            cov += self.eps * torch.eye(cov.size(0), device=self.device)
+            cov = cov + self.eps * torch.eye(cov.size(0), device=Z.device)
             # cholesky: cov = L @ L.T
             L = torch.linalg.cholesky(cov)
             latent_var_mean = Z.var(dim=0, unbiased=False).mean().item()

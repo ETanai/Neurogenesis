@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Dict, Optional
 
@@ -48,17 +49,21 @@ class AutoencoderPretrainer:
             history["val_loss"] = []
 
         for epoch in range(self.config.epochs):
+            t0 = time.perf_counter()
             train_loss = self._run_epoch(train_loader, training=True)
             history["train_loss"].append(train_loss)
 
             if log_fn is not None:
                 log_fn({"pretrain/train_loss": train_loss}, epoch)
+                log_fn({"timing/pretrain_epoch_sec": time.perf_counter() - t0}, epoch)
 
             if val_loader is not None:
+                t1 = time.perf_counter()
                 val_loss = self._run_epoch(val_loader, training=False)
                 history["val_loss"].append(val_loss)
                 if log_fn is not None:
                     log_fn({"pretrain/val_loss": val_loss}, epoch)
+                    log_fn({"timing/val_epoch_sec": time.perf_counter() - t1}, epoch)
 
         return history
 
@@ -68,7 +73,9 @@ class AutoencoderPretrainer:
         else:
             self.model.eval()
 
-        losses: list[float] = []
+        # Accumulate losses on device to avoid per-batch CPU sync (.item()).
+        loss_sum = torch.zeros((), device=self.device)
+        n_batches = 0
         with torch.set_grad_enabled(training):
             for batch in loader:
                 x = batch[0].to(self.device, non_blocking=True)
@@ -81,7 +88,10 @@ class AutoencoderPretrainer:
                     loss.backward()
                     self.optimizer.step()
 
-                losses.append(float(loss.detach().cpu().item()))
+                # accumulate without synchronizing to CPU each step
+                loss_sum = loss_sum + loss.detach()
+                n_batches += 1
 
-        return float(torch.tensor(losses).mean().item()) if losses else 0.0
-
+        if n_batches == 0:
+            return 0.0
+        return float((loss_sum / n_batches).item())

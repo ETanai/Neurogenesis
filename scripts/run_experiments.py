@@ -5,13 +5,16 @@ from __future__ import annotations
 import csv
 import inspect
 import tempfile
+import time
 from pathlib import Path
 from typing import List, Sequence
 
 import hydra
 import torch
+import tqdm
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from data.mnist_datamodule import MNISTDataModule
 from models.ng_autoencoder import NGAutoEncoder
@@ -22,10 +25,7 @@ from utils.intrinsic_replay import IntrinsicReplay
 from utils.thresholds import ThresholdEstimationConfig, ThresholdEstimator
 
 try:  # optional dependency
-    from utils.viz_utils import (
-        plot_partial_recon_grid_mlflow,
-        plot_recon_grid_mlflow,
-    )
+    from utils.viz_utils import plot_partial_recon_grid_mlflow, plot_recon_grid_mlflow
 except ModuleNotFoundError:  # pragma: no cover - viz utils optional in CI
     plot_partial_recon_grid_mlflow = None
     plot_recon_grid_mlflow = None
@@ -61,7 +61,21 @@ class _MLflowLogger:
         mlflow.log_artifact(str(path), artifact_path=artifact_path)
 
     def log_image(self, image_bytes: bytes, artifact_file: str) -> None:
-        mlflow.log_image(image_bytes, artifact_file)
+        # mlflow.log_image expects numpy/PIL/mlflow.Image in some versions.
+        # If we are given raw bytes (e.g., PNG), fall back to log_artifact.
+        try:
+            mlflow.log_image(image_bytes, artifact_file)
+            return
+        except TypeError:
+            pass
+
+        parent = Path(artifact_file).parent.as_posix()
+        fname = Path(artifact_file).name
+        with tempfile.TemporaryDirectory() as td:
+            out_path = Path(td) / fname
+            with open(out_path, "wb") as fh:
+                fh.write(image_bytes)
+            mlflow.log_artifact(str(out_path), artifact_path=(parent if parent != "." else None))
 
     def log_figure(self, fig, artifact_file: str) -> None:
         mlflow.log_figure(fig, artifact_file)
@@ -133,12 +147,24 @@ def _instantiate_datamodule(cfg: DictConfig) -> MNISTDataModule:
 
 
 def _dataloader(dataset, *, batch_size: int, num_workers: int, shuffle: bool) -> DataLoader:
+    # Tune loader for throughput without changing behavior.
+    # - pin_memory only helps on CUDA; avoid extra overhead on CPU.
+    # - keep workers alive across epochs for speed.
+    # - small prefetch improves pipeline when workers > 0.
+    use_cuda = torch.cuda.is_available()
+    kwargs = {
+        "num_workers": num_workers,
+        "pin_memory": use_cuda,
+    }
+    if num_workers > 0:
+        kwargs["persistent_workers"] = True
+        kwargs["prefetch_factor"] = 2
+
     return DataLoader(
         dataset,
         batch_size=batch_size,
         shuffle=shuffle,
-        num_workers=num_workers,
-        pin_memory=True,
+        **kwargs,
     )
 
 
@@ -168,7 +194,9 @@ def _log_config_snapshot(cfg: DictConfig, logger) -> None:
 def _log_eval_records(records: list[dict], logger) -> None:
     if not records or isinstance(logger, _NullLogger):
         return
-    with tempfile.NamedTemporaryFile("w", suffix="_metrics.csv", delete=False, newline="") as handle:
+    with tempfile.NamedTemporaryFile(
+        "w", suffix="_metrics.csv", delete=False, newline=""
+    ) as handle:
         writer = csv.DictWriter(
             handle,
             fieldnames=[
@@ -188,12 +216,14 @@ def _log_eval_records(records: list[dict], logger) -> None:
     csv_path.unlink(missing_ok=True)
 
 
-def _maybe_make_visual_batch(dm, classes: Sequence[int], device: torch.device, *, split: str = "val"):
+def _maybe_make_visual_batch(
+    dm, classes: Sequence[int], device: torch.device, *, split: str = "val"
+):
     if hasattr(dm, "make_class_balanced_batch"):
         try:
             batch = dm.make_class_balanced_batch(
                 classes,
-                samples_per_class= min(4, max(1, 16 // max(1, len(classes)))),
+                samples_per_class=min(4, max(1, 16 // max(1, len(classes)))),
                 split=split,
                 device=device,
                 shuffle=False,
@@ -219,7 +249,9 @@ def _maybe_make_visual_batch(dm, classes: Sequence[int], device: torch.device, *
     return images.to(device), labels.to(device), []
 
 
-def _log_reconstruction_artifacts(model, dm, classes: Sequence[int], device: torch.device, logger, step: int) -> None:
+def _log_reconstruction_artifacts(
+    model, dm, classes: Sequence[int], device: torch.device, logger, step: int
+) -> None:
     if isinstance(logger, _NullLogger) or plot_recon_grid_mlflow is None:
         return
     sample = _maybe_make_visual_batch(dm, classes, device)
@@ -252,7 +284,9 @@ def _log_reconstruction_artifacts(model, dm, classes: Sequence[int], device: tor
                 images.detach().cpu(),
                 view_shape=view_shape,
                 levels=levels,
-                col_group_titles=[str(int(l)) for l in labels.detach().cpu().tolist()] if len(labels.shape) else None,
+                col_group_titles=[str(int(l)) for l in labels.detach().cpu().tolist()]
+                if len(labels.shape)
+                else None,
                 col_group_splits=splits if splits else None,
                 return_mlflow_artifact=True,
             )
@@ -283,6 +317,7 @@ def _log_replay_stats(replay: IntrinsicReplay | None, logger, step: int) -> None
     if weights:
         logger.log_dict(weights, "replay/class_weights.json")
 
+
 def _build_model(cfg: DictConfig, device: torch.device) -> NGAutoEncoder:
     model = NGAutoEncoder(
         input_dim=cfg.model.input_dim,
@@ -294,14 +329,20 @@ def _build_model(cfg: DictConfig, device: torch.device) -> NGAutoEncoder:
     return model.to(device)
 
 
-def _collect_thresholds(model: NGAutoEncoder, loader: DataLoader, cfg: DictConfig) -> List[float]:
+def _collect_thresholds(
+    model: NGAutoEncoder, loader: DataLoader, cfg: DictConfig, logger=None
+) -> List[float]:
     thresh_cfg = ThresholdEstimationConfig(
         percentile=cfg.experiment.threshold.percentile,
         margin=cfg.experiment.threshold.margin,
         minimum=cfg.experiment.threshold.minimum,
     )
     estimator = ThresholdEstimator(model, config=thresh_cfg)
-    return estimator.estimate(loader)
+    t0 = time.perf_counter()
+    vals = estimator.estimate(loader)
+    if logger is not None:
+        logger.log_metrics({"timing/threshold_estimation_sec": time.perf_counter() - t0})
+    return vals
 
 
 def _dataset_kwargs(func, split: str) -> dict:
@@ -338,13 +379,28 @@ def _bootstrap_replay(
     batch_size: int,
     num_workers: int,
 ) -> None:
+    t_total = time.perf_counter()
     for cls in classes:
+        t_cls = time.perf_counter()
         subset = _get_class_dataset(dm, cls, split="train")
         loader = _dataloader(subset, batch_size=batch_size, num_workers=num_workers, shuffle=False)
+        loader = tqdm(
+            loader,
+            desc=f"Bootstrapping replay for class {cls}",
+            leave=True,
+        )
         replay.fit(loader)
+        try:
+            # best-effort logging if replay has a logger via outer scope
+            pass
+        except Exception:
+            pass
+    # aggregate timing is logged by caller where logger is available
 
 
-def _pretrain(model: NGAutoEncoder, dm: MNISTDataModule, cfg: DictConfig, device: torch.device, logger) -> None:
+def _pretrain(
+    model: NGAutoEncoder, dm: MNISTDataModule, cfg: DictConfig, device: torch.device, logger
+) -> None:
     base_classes = cfg.experiment.base_classes
     train_subset = _get_combined_dataset(dm, base_classes, split="train")
     train_loader = _dataloader(
@@ -371,7 +427,23 @@ def _pretrain(model: NGAutoEncoder, dm: MNISTDataModule, cfg: DictConfig, device
         device=str(device),
     )
     trainer = AutoencoderPretrainer(model, pre_cfg)
+    t0 = time.perf_counter()
+
+    train_loader = tqdm(
+        train_loader,
+        desc="Pretraining",
+        leave=True,
+    )
+
+    if val_loader is not None:
+        val_loader = tqdm(
+            val_loader,
+            desc="Validation",
+            leave=True,
+        )
+
     trainer.fit(train_loader, val_loader=val_loader, log_fn=logger.log_metrics)
+    logger.log_metrics({"timing/pretrain_total_sec": time.perf_counter() - t0})
 
 
 def _evaluate(
@@ -389,7 +461,9 @@ def _evaluate(
         num_workers=cfg.data.num_workers,
         shuffle=False,
     )
+    t0 = time.perf_counter()
     mean_losses, max_losses, std_losses = trainer.test_all_levels(loader)
+    logger.log_metrics({"timing/eval_sec": time.perf_counter() - t0}, step=step)
     classes_repr = ",".join(str(int(c)) for c in classes)
     records: list[dict] = []
     for idx, (mean_v, max_v, std_v) in enumerate(zip(mean_losses, max_losses, std_losses)):
@@ -430,6 +504,7 @@ def _resolve_regime(cfg: DictConfig) -> tuple[bool, bool]:
 
 def run(cfg: DictConfig) -> None:
     print(OmegaConf.to_yaml(cfg))
+    t_run0 = time.perf_counter()
     _seed_everything(cfg.seed)
     device = _prep_device(cfg)
 
@@ -457,7 +532,9 @@ def run(cfg: DictConfig) -> None:
 
     model = _build_model(cfg, device)
 
+    t_pre0 = time.perf_counter()
     _pretrain(model, dm, cfg, device, logger)
+    logger.log_metrics({"timing/pretrain_sec": time.perf_counter() - t_pre0})
 
     use_neurogenesis, use_replay = _resolve_regime(cfg)
 
@@ -470,19 +547,26 @@ def run(cfg: DictConfig) -> None:
             num_workers=cfg.data.num_workers,
             shuffle=False,
         )
-        thresholds = _collect_thresholds(model, threshold_loader, cfg)
+        thresholds = _collect_thresholds(model, threshold_loader, cfg, logger=logger)
         if len(thresholds) != len(cfg.model.hidden_sizes):
             raise RuntimeError("Threshold count does not match hidden layers")
 
     replay = None
     if use_replay:
-        replay = IntrinsicReplay(model.encoder, model.decoder, eps=cfg.replay.cov_eps, device=device)
+        replay = IntrinsicReplay(
+            model.encoder, model.decoder, eps=cfg.replay.cov_eps, device=device
+        )
+        t_boot0 = time.perf_counter()
         _bootstrap_replay(
             replay,
             dm,
             cfg.experiment.base_classes,
             batch_size=min(cfg.replay.stats_batch_size, cfg.data.batch_size),
             num_workers=cfg.data.num_workers,
+        )
+        logger.log_metrics(
+            {"timing/replay_bootstrap_sec": time.perf_counter() - t_boot0},
+            step=len(cfg.experiment.base_classes),
         )
         _log_replay_stats(replay, logger, step=len(cfg.experiment.base_classes))
 
@@ -517,13 +601,12 @@ def run(cfg: DictConfig) -> None:
     learned: list[int] = list(cfg.experiment.base_classes)
     trainer.log_global_sizes()
     eval_records: list[dict] = []
-    eval_records.extend(
-        _evaluate(trainer, dm, learned, cfg, step=len(learned), logger=logger)
-    )
+    eval_records.extend(_evaluate(trainer, dm, learned, cfg, step=len(learned), logger=logger))
     _log_reconstruction_artifacts(model, dm, learned, device, logger, step=len(learned))
 
     for stage, class_id in enumerate(cfg.experiment.incremental_classes, start=1):
         subset = _get_class_dataset(dm, class_id, split="train")
+        t_learn0 = time.perf_counter()
         loader = _dataloader(
             subset,
             batch_size=cfg.data.batch_size,
@@ -531,9 +614,13 @@ def run(cfg: DictConfig) -> None:
             shuffle=True,
         )
         trainer.learn_class(class_id, loader)
+        logger.log_metrics(
+            {"timing/learn_class_sec": time.perf_counter() - t_learn0}, step=len(learned) + 1
+        )
         learned.append(class_id)
         trainer.log_global_sizes()
         if replay is not None:
+            t_boot_inc0 = time.perf_counter()
             _bootstrap_replay(
                 replay,
                 dm,
@@ -541,18 +628,24 @@ def run(cfg: DictConfig) -> None:
                 batch_size=min(cfg.replay.stats_batch_size, cfg.data.batch_size),
                 num_workers=cfg.data.num_workers,
             )
+            logger.log_metrics(
+                {"timing/replay_update_sec": time.perf_counter() - t_boot_inc0}, step=len(learned)
+            )
         _log_replay_stats(replay, logger, step=len(learned))
-        eval_records.extend(
-            _evaluate(trainer, dm, learned, cfg, step=len(learned), logger=logger)
-        )
+        eval_records.extend(_evaluate(trainer, dm, learned, cfg, step=len(learned), logger=logger))
+        t_fig0 = time.perf_counter()
         _log_reconstruction_artifacts(model, dm, learned, device, logger, step=len(learned))
+        logger.log_metrics(
+            {"timing/recon_artifacts_sec": time.perf_counter() - t_fig0}, step=len(learned)
+        )
 
     _log_eval_records(eval_records, logger)
+    logger.log_metrics({"timing/total_run_sec": time.perf_counter() - t_run0})
     logger.finish()
     return {"model": model, "trainer": trainer, "replay": replay}
 
 
-@hydra.main(version_base=None, config_path="config", config_name="train")
+@hydra.main(version_base=None, config_path="../config", config_name="train")
 def main(cfg: DictConfig) -> None:
     run(cfg)
 

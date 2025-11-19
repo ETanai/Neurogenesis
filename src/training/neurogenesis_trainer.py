@@ -112,7 +112,13 @@ class NeurogenesisTrainer:
         # print(f"[DEBUG] first 10 outlier_real_idxs = {outlier_real_idxs[:10]}")
 
         # 5) Build subset & return loader
-        subset = Subset(loader.dataset, outlier_real_idxs)
+        # If the original loader.dataset is already a Subset, its `.indices`
+        # refer to the underlying base dataset. We must create the new Subset
+        # from that base dataset, not from the Subset itself, otherwise the
+        # indices would be interpreted relative to the Subset and can go
+        # out-of-range. For non-Subset datasets, use the dataset directly.
+        base_ds = loader.dataset.dataset if isinstance(loader.dataset, Subset) else loader.dataset
+        subset = Subset(base_ds, outlier_real_idxs)
         outlier_loader = DataLoader(
             subset,
             batch_size=loader.batch_size,
@@ -154,17 +160,10 @@ class NeurogenesisTrainer:
         if self.logger:
             self.logger.log_metrics({"classes_learned": self._class_count}, step=self._class_count)
 
-        # Fit IR stats for the incoming class
-        if self.ir is not None:
-            self.ir.fit(loader)
         device = self._model_device()
         old_x = None
         dataset_size = len(loader.dataset)
-        if (
-            self.ir is not None
-            and self.ir.available_classes()
-            and dataset_size > 0
-        ):
+        if self.ir is not None and self.ir.available_classes() and dataset_size > 0:
             old_x = self.ir.sample_images(None, dataset_size).to(device)
 
         pbar_levels = tqdm(range(num_layers), desc=f"[Class {class_id}] Layers", unit="lvl")
@@ -314,7 +313,16 @@ class NeurogenesisTrainer:
 
             pbar_levels.update(1)
         pbar_levels.close()
+        # Fit IR stats for the incoming class
 
+        loader = tqdm(
+            loader,
+            desc=f"[Class {class_id}] Fitting IR",
+            unit="batch",
+            leave=False,
+        )
+        if self.ir is not None:
+            self.ir.fit(loader)
         self.log_global_sizes()
 
         # Refresh replay statistics with the now-updated encoder

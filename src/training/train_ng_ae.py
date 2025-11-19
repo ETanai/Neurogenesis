@@ -20,7 +20,7 @@ def build_mlflow_logger(cfg: DictConfig) -> MLFlowLogger:
     )
 
 
-@hydra.main(config_path="config", config_name="train", version_base=None)
+@hydra.main(config_path="../../config", config_name="train", version_base=None)
 def main(cfg: DictConfig):
     warnings.warn(
         "'training/train_ng_ae.py' is deprecated; use 'scripts/run_experiments.py' instead.",

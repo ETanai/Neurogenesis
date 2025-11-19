@@ -363,39 +363,125 @@ class NGAutoEncoder(nn.Module):
         • one forward/backward per batch
         • optional replay tensor concatenated to every mini-batch
         """
+        from time import perf_counter
+
+        from tqdm import tqdm
+
         device = next(self.parameters()).device
         self.train()
 
         history = {"epoch_loss": []}
         for epoch in range(epochs):
             batch_losses = []
-            for batch in loader:
+
+            # accumulators for timings (seconds)
+            t_data = 0.0
+            t_concat = 0.0
+            t_forward = 0.0
+            t_loss = 0.0
+            t_backward = 0.0
+            t_step = 0.0
+            n_batches = 0
+
+            # batch-wise progress bar
+            pbar = tqdm(loader, desc=f"Epoch {epoch + 1}/{epochs}", leave=True, unit="batch")
+            for batch in pbar:
+                # -- data transfer timing --
+                t0 = perf_counter()
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
                 x = batch[0].to(device, non_blocking=True)
                 x = x.view(x.size(0), -1)
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                t1 = perf_counter()
+                t_data += t1 - t0
 
-                # concatenate intrinsic-replay batch if provided
+                # -- concat (replay) timing --
+                t0 = perf_counter()
                 if replay is not None:
-                    # sample same #images as current batch
                     k = x.size(0)
-
                     idx = torch.randint(0, replay.size(0), (k,), device=device)
                     replay_batch = replay[idx].to(device)
                     replay_batch = replay_batch.view(k, -1)
                     x = torch.cat([x, replay_batch], dim=0)
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                t1 = perf_counter()
+                t_concat += t1 - t0
 
+                # -- forward timing --
+                t0 = perf_counter()
                 optim.zero_grad(set_to_none=True)
                 if forward_fn is None:
                     out = self.forward(x)
                     x_hat = out["recon"] if isinstance(out, dict) else out
                 else:
                     x_hat = forward_fn(x)
-                loss = self.reconstruction_error(x_hat, x).mean()
-                loss.backward()
-                optim.step()
-                batch_losses.append(loss.item())
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                t1 = perf_counter()
+                t_forward += t1 - t0
 
-            epoch_loss = float(torch.tensor(batch_losses).mean())
+                # -- loss timing --
+                t0 = perf_counter()
+                loss = self.reconstruction_error(x_hat, x).mean()
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                t1 = perf_counter()
+                t_loss += t1 - t0
+
+                # -- backward timing --
+                t0 = perf_counter()
+                loss.backward()
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                t1 = perf_counter()
+                t_backward += t1 - t0
+
+                # -- step timing --
+                t0 = perf_counter()
+                optim.step()
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                t1 = perf_counter()
+                t_step += t1 - t0
+
+                batch_losses.append(loss.item())
+                n_batches += 1
+
+                # update tqdm with running stats
+                avg_loss = float(torch.tensor(batch_losses).mean()) if batch_losses else 0.0
+                pbar.set_postfix(
+                    {
+                        "loss": f"{avg_loss:.4f}",
+                        "data(ms)": f"{(t_data / max(n_batches, 1)) * 1000:.1f}",
+                        "fwd(ms)": f"{(t_forward / max(n_batches, 1)) * 1000:.1f}",
+                    }
+                )
+
+            pbar.close()
+
+            epoch_loss = float(torch.tensor(batch_losses).mean()) if batch_losses else 0.0
             history["epoch_loss"].append(epoch_loss)
+
+            # epoch timing summary
+            if n_batches > 0:
+                summary = {
+                    "epoch": epoch + 1,
+                    "loss": epoch_loss,
+                    "avg_data_ms": (t_data / n_batches) * 1000.0,
+                    "avg_concat_ms": (t_concat / n_batches) * 1000.0,
+                    "avg_forward_ms": (t_forward / n_batches) * 1000.0,
+                    "avg_loss_ms": (t_loss / n_batches) * 1000.0,
+                    "avg_backward_ms": (t_backward / n_batches) * 1000.0,
+                    "avg_step_ms": (t_step / n_batches) * 1000.0,
+                }
+                tqdm.write(
+                    f"Epoch {epoch + 1} summary — loss: {summary['loss']:.4f} | "
+                    f"data {summary['avg_data_ms']:.1f}ms | concat {summary['avg_concat_ms']:.1f}ms | "
+                    f"fwd {summary['avg_forward_ms']:.1f}ms | back {summary['avg_backward_ms']:.1f}ms | step {summary['avg_step_ms']:.1f}ms"
+                )
 
             if early_stopper and early_stopper.step(epoch_loss):
                 break
