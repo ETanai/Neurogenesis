@@ -198,13 +198,19 @@ class NeurogenesisTrainer:
                 nodes_existing = self.ae.encoder[2 * level].n_out_features
                 max_new = int(math.ceil(self.factor_max_new_nodes * nodes_existing))
                 num_new = int(min([num_new, max_new]))
-                self.ae.add_new_nodes(level, num_new)
-                n_plastic_neurons += num_new
-                if self.logger:
-                    self.logger.log_metrics(
-                        {f"class_{class_id}_level_{level}_n_plastic_neurons": n_plastic_neurons},
-                        step=added,
-                    )
+            self.ae.add_new_nodes(level, num_new)
+            n_plastic_neurons += num_new
+            if self.logger:
+                self.logger.log_metrics(
+                    {f"class_{class_id}_level_{level}_n_plastic_neurons": n_plastic_neurons},
+                    step=added,
+                )
+                # cumulative size per level after growth step
+                current_sizes = {
+                    f"class_{class_id}_level_{lvl}_cumulative_size": sz
+                    for lvl, sz in enumerate(self.ae.hidden_sizes)
+                }
+                self.logger.log_metrics(current_sizes, step=added)
                 # Plasticity phase (epochs)
 
                 last_loss = 1
@@ -229,6 +235,13 @@ class NeurogenesisTrainer:
                             f"class_{class_id}_level_{level}_delta_loss_plasticity": delta_loss,
                         },
                         step_plasticety,
+                    )
+                    self.logger.log_metrics(
+                        {
+                            f"class_{class_id}_level_{level}_loss_plasticity_iter": mean_loss,
+                            f"class_{class_id}_level_{level}_delta_loss_plasticity_iter": delta_loss,
+                        },
+                        step=self._class_count,
                     )
                 step_plasticety += 1
                 last_loss = mean_loss
@@ -255,6 +268,13 @@ class NeurogenesisTrainer:
                         },
                         step_stability,
                     )
+                    self.logger.log_metrics(
+                        {
+                            f"class_{class_id}_level_{level}_loss_stability_iter": mean_loss,
+                            f"class_{class_id}_level_{level}_delta_loss_stability_iter": delta_loss,
+                        },
+                        step=self._class_count,
+                    )
                 step_stability += 1
                 last_loss = mean_loss
                 # if torch.tensor(losses_stability).mean() <= self.mean_layer_losses[level] * 0.8:
@@ -269,6 +289,10 @@ class NeurogenesisTrainer:
                     self.logger.log_metrics(
                         {f"class_{class_id}_level_{level}_avg_loss": errs.mean().item()},
                         step=added,
+                    )
+                    self.logger.log_metrics(
+                        {f"class_{class_id}_level_{level}_avg_loss_iter": errs.mean().item()},
+                        step=self._class_count,
                     )
 
                 added += 1

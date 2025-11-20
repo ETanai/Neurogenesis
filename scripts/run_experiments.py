@@ -607,6 +607,9 @@ def run(cfg: DictConfig) -> None:
         thresholds = _collect_thresholds(model, threshold_loader, cfg, logger=logger)
         if len(thresholds) != len(cfg.model.hidden_sizes):
             raise RuntimeError("Threshold count does not match hidden layers")
+        # log resolved thresholds per level
+        for i, thr in enumerate(thresholds):
+            logger.log_metrics({f"threshold/level_{i}": float(thr)}, step=0)
 
     replay = None
     if use_replay:
