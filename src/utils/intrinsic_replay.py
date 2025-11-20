@@ -19,7 +19,7 @@ class IntrinsicReplay:
         self,
         encoder: nn.Module,
         decoder: nn.Module,
-        eps: float = 1e-5,
+        eps: float = 1e-6,
         device: Optional[torch.device] = None,
     ):
         """

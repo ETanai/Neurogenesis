@@ -181,6 +181,48 @@ def _dataloader(dataset, *, batch_size: int, num_workers: int, shuffle: bool) ->
     )
 
 
+def _train_loader_for_classes(dm, classes: Sequence[int], *, shuffle: bool) -> DataLoader:
+    """
+    Reuse a datamodule's persistent train loader by updating its sampler indices.
+    Falls back to building a fresh loader if sampler mutation is unsupported.
+    """
+    # Prefer class/combined loaders on the data module (they reuse workers).
+    loader = None
+    if len(classes) == 1 and hasattr(dm, "get_class_dataloader"):
+        try:
+            loader = dm.get_class_dataloader(int(classes[0]))
+        except Exception:
+            loader = None
+    elif hasattr(dm, "get_combined_dataloader"):
+        try:
+            loader = dm.get_combined_dataloader(classes)
+        except Exception:
+            loader = None
+
+    # If sampler is mutable, reshuffle indices when requested.
+    if loader is not None and hasattr(loader, "sampler") and hasattr(loader.sampler, "set"):
+        idxs = list(getattr(loader.sampler, "idxs", []))
+        if shuffle and len(idxs) > 1:
+            perm = torch.randperm(len(idxs)).tolist()
+            idxs = [idxs[i] for i in perm]
+        try:
+            loader.sampler.set(idxs)
+            return loader
+        except Exception:
+            loader = None
+
+    # Fallback: build a one-off loader
+    subset = _get_combined_dataset(dm, classes, split="train")
+    return _dataloader(
+        subset,
+        batch_size=getattr(dm, "hparams", {}).get("batch_size", 32)
+        if hasattr(dm, "hparams")
+        else 32,
+        num_workers=0,
+        shuffle=shuffle,
+    )
+
+
 def _prep_device(cfg: DictConfig) -> torch.device:
     requested = cfg.training.device
     if requested == "auto":
@@ -403,8 +445,7 @@ def _bootstrap_replay(
     t_total = time.perf_counter()
     for cls in classes:
         t_cls = time.perf_counter()
-        subset = _get_class_dataset(dm, cls, split="train")
-        loader = _dataloader(subset, batch_size=batch_size, num_workers=num_workers, shuffle=False)
+        loader = _train_loader_for_classes(dm, [cls], shuffle=False)
         loader = tqdm(
             loader,
             desc=f"Bootstrapping replay for class {cls}",
@@ -424,12 +465,7 @@ def _pretrain(
 ) -> None:
     base_classes = cfg.experiment.base_classes
     train_subset = _get_combined_dataset(dm, base_classes, split="train")
-    train_loader = _dataloader(
-        train_subset,
-        batch_size=cfg.data.batch_size,
-        num_workers=cfg.data.num_workers,
-        shuffle=True,
-    )
+    train_loader = _train_loader_for_classes(dm, base_classes, shuffle=True)
 
     val_loader = None
     if cfg.training.validate:
@@ -629,12 +665,7 @@ def run(cfg: DictConfig) -> None:
     for stage, class_id in enumerate(cfg.experiment.incremental_classes, start=1):
         subset = _get_class_dataset(dm, class_id, split="train")
         t_learn0 = time.perf_counter()
-        loader = _dataloader(
-            subset,
-            batch_size=cfg.data.batch_size,
-            num_workers=cfg.data.num_workers,
-            shuffle=True,
-        )
+        loader = _train_loader_for_classes(dm, [class_id], shuffle=True)
         trainer.learn_class(class_id, loader)
         logger.log_metrics(
             {"timing/learn_class_sec": time.perf_counter() - t_learn0}, step=len(learned) + 1
