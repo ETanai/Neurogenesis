@@ -63,19 +63,32 @@ class _MLflowLogger:
     def log_image(self, image_bytes: bytes, artifact_file: str) -> None:
         # mlflow.log_image expects numpy/PIL/mlflow.Image in some versions.
         # If we are given raw bytes (e.g., PNG), fall back to log_artifact.
-        try:
-            mlflow.log_image(image_bytes, artifact_file)
-            return
-        except TypeError:
-            pass
-
         parent = Path(artifact_file).parent.as_posix()
         fname = Path(artifact_file).name
-        with tempfile.TemporaryDirectory() as td:
-            out_path = Path(td) / fname
-            with open(out_path, "wb") as fh:
-                fh.write(image_bytes)
-            mlflow.log_artifact(str(out_path), artifact_path=(parent if parent != "." else None))
+
+        if isinstance(image_bytes, (bytes, bytearray)):
+            with tempfile.TemporaryDirectory() as td:
+                out_path = Path(td) / fname
+                with open(out_path, "wb") as fh:
+                    fh.write(image_bytes)
+                mlflow.log_artifact(
+                    str(out_path), artifact_path=(parent if parent != "." else None)
+                )
+            return
+
+        try:
+            mlflow.log_image(image_bytes, artifact_file)
+        except Exception:
+            with tempfile.TemporaryDirectory() as td:
+                out_path = Path(td) / fname
+                # best-effort: if this is a PIL image-like object with .save
+                if hasattr(image_bytes, "save"):
+                    image_bytes.save(out_path)
+                    mlflow.log_artifact(
+                        str(out_path), artifact_path=(parent if parent != "." else None)
+                    )
+                else:
+                    raise
 
     def log_figure(self, fig, artifact_file: str) -> None:
         mlflow.log_figure(fig, artifact_file)
@@ -279,15 +292,18 @@ def _log_reconstruction_artifacts(
     if plot_partial_recon_grid_mlflow is not None:
         try:
             levels = list(range(len(model.hidden_sizes)))
+            col_titles = None
+            col_splits = None
+            if splits:
+                col_titles = [str(int(c)) for c in classes]
+                col_splits = splits
             fig_partial, png_partial = plot_partial_recon_grid_mlflow(
                 model,
                 images.detach().cpu(),
                 view_shape=view_shape,
                 levels=levels,
-                col_group_titles=[str(int(l)) for l in labels.detach().cpu().tolist()]
-                if len(labels.shape)
-                else None,
-                col_group_splits=splits if splits else None,
+                col_group_titles=col_titles,
+                col_group_splits=col_splits,
                 return_mlflow_artifact=True,
             )
             logger.log_image(png_partial, f"figures/partial_reconstructions_step_{step}.png")
@@ -378,7 +394,12 @@ def _bootstrap_replay(
     *,
     batch_size: int,
     num_workers: int,
+    reset_stats: bool = False,
 ) -> None:
+    if reset_stats:
+        replay.stats.clear()
+        replay.set_class_weights({})
+
     t_total = time.perf_counter()
     for cls in classes:
         t_cls = time.perf_counter()
@@ -432,14 +453,14 @@ def _pretrain(
     train_loader = tqdm(
         train_loader,
         desc="Pretraining",
-        leave=True,
+        leave=False,
     )
 
     if val_loader is not None:
         val_loader = tqdm(
             val_loader,
             desc="Validation",
-            leave=True,
+            leave=False,
         )
 
     trainer.fit(train_loader, val_loader=val_loader, log_fn=logger.log_metrics)
@@ -563,6 +584,7 @@ def run(cfg: DictConfig) -> None:
             cfg.experiment.base_classes,
             batch_size=min(cfg.replay.stats_batch_size, cfg.data.batch_size),
             num_workers=cfg.data.num_workers,
+            reset_stats=True,
         )
         logger.log_metrics(
             {"timing/replay_bootstrap_sec": time.perf_counter() - t_boot0},
@@ -617,20 +639,24 @@ def run(cfg: DictConfig) -> None:
         logger.log_metrics(
             {"timing/learn_class_sec": time.perf_counter() - t_learn0}, step=len(learned) + 1
         )
-        learned.append(class_id)
+        # recompute replay stats for all learned classes with the updated encoder
+        all_classes = learned + [class_id]
         trainer.log_global_sizes()
         if replay is not None:
             t_boot_inc0 = time.perf_counter()
             _bootstrap_replay(
                 replay,
                 dm,
-                [class_id],
+                all_classes,
                 batch_size=min(cfg.replay.stats_batch_size, cfg.data.batch_size),
                 num_workers=cfg.data.num_workers,
+                reset_stats=True,
             )
             logger.log_metrics(
-                {"timing/replay_update_sec": time.perf_counter() - t_boot_inc0}, step=len(learned)
+                {"timing/replay_update_sec": time.perf_counter() - t_boot_inc0},
+                step=len(all_classes),
             )
+        learned.append(class_id)
         _log_replay_stats(replay, logger, step=len(learned))
         eval_records.extend(_evaluate(trainer, dm, learned, cfg, step=len(learned), logger=logger))
         t_fig0 = time.perf_counter()

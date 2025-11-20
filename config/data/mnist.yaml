@@ -1,4 +1,4 @@
 name: mnist
 batch_size: 128
-num_workers: 4
+num_workers: 0
 data_dir: ${oc.env:MNIST_DATA_DIR,./data}

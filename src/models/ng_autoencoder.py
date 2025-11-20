@@ -384,7 +384,7 @@ class NGAutoEncoder(nn.Module):
             n_batches = 0
 
             # batch-wise progress bar
-            pbar = tqdm(loader, desc=f"Epoch {epoch + 1}/{epochs}", leave=True, unit="batch")
+            pbar = tqdm(loader, desc=f"Epoch_train {epoch + 1}/{epochs}", leave=False, unit="batch")
             for batch in pbar:
                 # -- data transfer timing --
                 t0 = perf_counter()

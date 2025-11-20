@@ -19,7 +19,7 @@ class IntrinsicReplay:
         self,
         encoder: nn.Module,
         decoder: nn.Module,
-        eps: float = 1e-6,
+        eps: float = 1e-5,
         device: Optional[torch.device] = None,
     ):
         """
@@ -38,6 +38,28 @@ class IntrinsicReplay:
         # Will hold per-class: {"class_id": {"mean": (d,), "L": (d,d)}}
         self.stats: Dict[int, Dict[str, torch.Tensor]] = {}
         self._class_weights: Dict[int, float] = {}
+
+    def _safe_cholesky(self, cov: torch.Tensor) -> torch.Tensor:
+        """
+        Robust Cholesky that retries with increasing jitter along the diagonal to
+        handle near-singular or non-PD covariances (common with few samples).
+        """
+        # enforce symmetry to reduce numerical noise
+        cov = 0.5 * (cov + cov.T)
+        eye = torch.eye(cov.size(0), device=cov.device, dtype=cov.dtype)
+        jitter = self.eps
+        for _ in range(7):
+            try:
+                return torch.linalg.cholesky(cov + jitter * eye)
+            except RuntimeError:
+                jitter *= 10.0
+        # eigenvalue fallback: clamp to make PSD
+        evals, evecs = torch.linalg.eigh(cov)
+        min_pos = max(float(self.eps), float(evals.max().item()) * 1e-12)
+        evals_clamped = torch.clamp(evals, min=min_pos)
+        cov_pd = (evecs @ torch.diag(evals_clamped) @ evecs.T)
+        cov_pd = 0.5 * (cov_pd + cov_pd.T) + self.eps * eye
+        return torch.linalg.cholesky(cov_pd)
 
     @torch.no_grad()
     def fit(self, dataloader: DataLoader, *, class_filter: Optional[Iterable[int]] = None) -> None:
@@ -67,10 +89,8 @@ class IntrinsicReplay:
                 cov = (Zc.T @ Zc) / (Zc.size(0) - 1)
             else:
                 cov = torch.zeros((Zc.size(1), Zc.size(1)), device=Z.device)
-            # make PD
-            cov = cov + self.eps * torch.eye(cov.size(0), device=Z.device)
-            # cholesky: cov = L @ L.T
-            L = torch.linalg.cholesky(cov)
+            # make PD (robust to rank deficiency)
+            L = self._safe_cholesky(cov)
             latent_var_mean = Z.var(dim=0, unbiased=False).mean().item()
 
             self.stats[cls] = {

@@ -1,5 +1,5 @@
 mlflow:
   enabled: true
-  tracking_uri: ${oc.env:MLFLOW_TRACKING_URI,file:./mlruns}
+  tracking_uri: http://localhost:5000
   experiment_name: neurogenesis
   run_name: ${now:%Y%m%d_%H%M%S}
