@@ -1,4 +1,4 @@
-pretrain_epochs: 15
+pretrain_epochs: 20
 base_lr: 0.001
 weight_decay: 0.0
 device: auto
