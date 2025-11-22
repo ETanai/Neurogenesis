@@ -1,11 +1,11 @@
 max_nodes: [10, 10, 10, 10]
 max_outlier_fraction: 0.1
-plasticity_epochs: 100
-stability_epochs: 100
-next_layer_epochs: 100
+plasticity_epochs: 500
+stability_epochs: 500
+next_layer_epochs: 500
 factor_max_new_nodes: 0.1
 factor_new_nodes: 0.02
 early_stop:
   min_delta: 1.0e-4
-  patience: 3
+  patience: 2
   mode: min

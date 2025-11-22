@@ -17,7 +17,7 @@ class ThresholdEstimationConfig:
 
     percentile: float = 0.95
     margin: float = 0.0
-    minimum: float = 1e-6
+    minimum: float = 1e-5
 
 
 class ThresholdEstimator:
