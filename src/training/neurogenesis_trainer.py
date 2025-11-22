@@ -151,6 +151,39 @@ class NeurogenesisTrainer:
             }
             self.logger.log_metrics(global_metrics, step=self._class_count)
 
+    def _build_epoch_logger(self, class_id: Any, level: int, round_idx: int):
+        if not self.logger:
+            return None
+
+        metric_prefix = f"class_{class_id}"
+        artifact_prefix = f"plasticity/class_{class_id}/level_{level}/round_{round_idx}"
+        log_dict_fn = getattr(self.logger, "log_dict", None)
+
+        def _callback(epoch_idx: int, summary: dict):
+            phase = summary.get("phase", "train")
+            metrics = {}
+            for key, value in summary.items():
+                if key == "epoch":
+                    continue
+                if isinstance(value, (float, int)):
+                    metrics[
+                        f"{metric_prefix}/{phase}_level_{level}_round_{round_idx}_{key}"
+                    ] = float(value)
+            if metrics:
+                self.logger.log_metrics(metrics, step=epoch_idx + 1)
+            if callable(log_dict_fn):
+                payload = {
+                    "class_id": class_id,
+                    "level": level,
+                    "round": round_idx,
+                    "phase": phase,
+                    "epoch": epoch_idx + 1,
+                    **summary,
+                }
+                log_dict_fn(payload, f"{artifact_prefix}/epoch_{epoch_idx + 1}.json")
+
+        return _callback
+
     def learn_class(self, class_id: Any, loader: DataLoader) -> None:
         num_layers = len(self.ae.hidden_sizes)
         self.history[class_id] = {"layer_errors": [[] for _ in range(num_layers)]}
@@ -182,6 +215,11 @@ class NeurogenesisTrainer:
                     step=added,
                 )
 
+            if self.logger:
+                self.logger.log_metrics(
+                    {f"class_{class_id}/growth_level_{level}": self.ae.hidden_sizes[level]},
+                    step=added,
+                )
             max_rounds = self.max_nodes[level]
             pbar_growth = tqdm(
                 range(max_rounds), desc=f"  Level {level} Growth", unit="rnd", leave=False
@@ -190,7 +228,7 @@ class NeurogenesisTrainer:
             step_plasticety = 0
             step_stability = 0
 
-            for i_growth in pbar_growth:
+            for _ in pbar_growth:
                 if not (fraction > self.max_outliers and added < max_rounds):
                     break
 
@@ -198,31 +236,36 @@ class NeurogenesisTrainer:
                 nodes_existing = self.ae.encoder[2 * level].n_out_features
                 max_new = int(math.ceil(self.factor_max_new_nodes * nodes_existing))
                 num_new = int(min([num_new, max_new]))
-            self.ae.add_new_nodes(level, num_new)
-            n_plastic_neurons += num_new
-            if self.logger:
-                self.logger.log_metrics(
-                    {f"class_{class_id}_level_{level}_n_plastic_neurons": n_plastic_neurons},
-                    step=added,
-                )
-                # cumulative size per level after growth step
-                current_sizes = {
-                    f"class_{class_id}_level_{lvl}_cumulative_size": sz
-                    for lvl, sz in enumerate(self.ae.hidden_sizes)
-                }
-                self.logger.log_metrics(current_sizes, step=added)
-                # Plasticity phase (epochs)
+
+                self.ae.add_new_nodes(level, num_new)
+                n_plastic_neurons += num_new
+                if self.logger:
+                    self.logger.log_metrics(
+                        {f"class_{class_id}_level_{level}_n_plastic_neurons": n_plastic_neurons},
+                        step=added,
+                    )
+                    current_sizes = {
+                        f"class_{class_id}_level_{lvl}_cumulative_size": sz
+                        for lvl, sz in enumerate(self.ae.hidden_sizes)
+                    }
+                    self.logger.log_metrics(current_sizes, step=added)
+                    self.logger.log_metrics(
+                        {f"class_{class_id}/growth_level_{level}": self.ae.hidden_sizes[level]},
+                        step=added,
+                    )
 
                 last_loss = 1
+                round_idx = added + 1
+                epoch_logger = self._build_epoch_logger(class_id, level, round_idx)
 
-                # Optimizer is created inside plasticity_phase, so call it once per growth round
                 hist = self.ae.plasticity_phase(
                     loader=outliers_loader,
                     level=level,
                     epochs=self.plasticity_epochs,
                     lr=self.base_lr,
                     early_stop_cfg=self.early_stop_cfg,
-                    forward_fn=lambda x: self.ae.forward_partial(x, level),  # partial forward
+                    forward_fn=lambda x: self.ae.forward_partial(x, level),
+                    epoch_logger=epoch_logger,
                 )
 
                 mean_loss = hist["epoch_loss"][-1]
@@ -245,16 +288,16 @@ class NeurogenesisTrainer:
                     )
                 step_plasticety += 1
                 last_loss = mean_loss
-                # Stability phase (epochs)
+
                 last_loss = 1
                 hist = self.ae.stability_phase(
                     loader=outliers_loader,
-                    level=int(len(self.ae.encoder) / 2) - 1,  # same level you used before
+                    level=int(len(self.ae.encoder) / 2) - 1,
                     lr=self.base_lr,
                     epochs=self.stability_epochs,
-                    old_x=old_x,  # replay tensor
+                    old_x=old_x,
                     early_stop_cfg=self.early_stop_cfg,
-                    # no forward_fn → full forward pass is used
+                    epoch_logger=epoch_logger,
                 )
 
                 mean_loss = hist["epoch_loss"][-1]
@@ -277,12 +320,7 @@ class NeurogenesisTrainer:
                     )
                 step_stability += 1
                 last_loss = mean_loss
-                # if torch.tensor(losses_stability).mean() <= self.mean_layer_losses[level] * 0.8:
-                #     break
-                # if delta_loss <= 0.0007:
-                #     break
 
-                # recompute errors & log
                 errs = self._get_recon_errors(loader, level)
                 self.history[class_id]["layer_errors"][level].append(errs.clone())
                 if self.logger:
@@ -306,8 +344,6 @@ class NeurogenesisTrainer:
                         },
                         step=added,
                     )
-
-                pbar_growth.update(1)
 
             pbar_growth.close()
 

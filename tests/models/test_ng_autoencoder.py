@@ -181,6 +181,21 @@ def test_plasticity_phase_updates_new_only(simple_ae, toy_input):
     assert not torch.allclose(enc_layer.weight_plastic, old_w_new)
 
 
+def test_plasticity_phase_epoch_logger(simple_ae, toy_input):
+    simple_ae.add_new_nodes(0, 1)
+    loader = DataLoader(TensorDataset(toy_input), batch_size=2)
+    calls = []
+
+    def _logger(epoch_idx, summary):
+        calls.append((epoch_idx, summary.get("phase"), summary.get("loss")))
+
+    simple_ae.plasticity_phase(loader, level=0, epochs=2, lr=1e-3, epoch_logger=_logger)
+    assert len(calls) == 2
+    assert calls[0][0] == 0
+    assert all(step == "plasticity" for _, step, _ in calls)
+    assert all(isinstance(loss, float) for _, _, loss in calls)
+
+
 def test_stability_phase_updates_all(simple_ae, toy_input):
     simple_ae.add_new_nodes(0, 2)
     loader = DataLoader(TensorDataset(toy_input), batch_size=2)

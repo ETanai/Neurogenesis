@@ -1,6 +1,6 @@
 from copy import deepcopy
 from functools import partial
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Union
 
 import torch
 import torch.nn.functional as F
@@ -16,6 +16,8 @@ _ACTS: dict[str, type[nn.Module]] = {
     "sigmoid": nn.Sigmoid,
     "identity": lambda: nn.Identity(),
 }
+
+EpochSummary = Dict[str, Union[int, float, str]]
 
 
 class EarlyStopper:
@@ -327,10 +329,19 @@ class NGAutoEncoder(nn.Module):
         lr: float,
         early_stop_cfg: Optional[dict] = None,
         forward_fn: Optional[Callable[[Tensor], Tensor]] = None,
+        epoch_logger: Optional[Callable[[int, EpochSummary], None]] = None,
     ):
         opt = self._optim_plasticity(level, lr)
         es = EarlyStopper(**early_stop_cfg) if early_stop_cfg else None
-        return self._run_epoch_loop(loader, opt, epochs, early_stopper=es, forward_fn=forward_fn)
+        return self._run_epoch_loop(
+            loader,
+            opt,
+            epochs,
+            early_stopper=es,
+            forward_fn=forward_fn,
+            epoch_logger=epoch_logger,
+            loop_label="plasticity",
+        )
 
     def stability_phase(
         self,
@@ -341,11 +352,19 @@ class NGAutoEncoder(nn.Module):
         old_x: Optional[torch.Tensor],
         early_stop_cfg: Optional[dict] = None,
         forward_fn: Optional[Callable[[Tensor], Tensor]] = None,
+        epoch_logger: Optional[Callable[[int, EpochSummary], None]] = None,
     ):
         opt = self._optim_stability(level, lr)
         es = EarlyStopper(**early_stop_cfg) if early_stop_cfg else None
         return self._run_epoch_loop(
-            loader, opt, epochs, replay=old_x, early_stopper=es, forward_fn=forward_fn
+            loader,
+            opt,
+            epochs,
+            replay=old_x,
+            early_stopper=es,
+            forward_fn=forward_fn,
+            epoch_logger=epoch_logger,
+            loop_label="stability",
         )
 
     def _run_epoch_loop(
@@ -357,6 +376,8 @@ class NGAutoEncoder(nn.Module):
         *,
         early_stopper: Optional[EarlyStopper] = None,
         forward_fn: Optional[Callable[[Tensor], Tensor]] = None,
+        epoch_logger: Optional[Callable[[int, EpochSummary], None]] = None,
+        loop_label: str = "train",
     ) -> Dict[str, list[float]]:
         """
         Generic train loop:
@@ -465,23 +486,32 @@ class NGAutoEncoder(nn.Module):
             epoch_loss = float(torch.tensor(batch_losses).mean()) if batch_losses else 0.0
             history["epoch_loss"].append(epoch_loss)
 
+            denom = max(n_batches, 1)
+            summary: EpochSummary = {
+                "epoch": epoch + 1,
+                "loss": epoch_loss,
+                # "avg_data_ms": (t_data / denom) * 1000.0,
+                # "avg_concat_ms": (t_concat / denom) * 1000.0,
+                # "avg_forward_ms": (t_forward / denom) * 1000.0,
+                # "avg_loss_ms": (t_loss / denom) * 1000.0,
+                # "avg_backward_ms": (t_backward / denom) * 1000.0,
+                # "avg_step_ms": (t_step / denom) * 1000.0,
+                "phase": loop_label,
+            }
+
             # epoch timing summary
-            if n_batches > 0:
-                summary = {
-                    "epoch": epoch + 1,
-                    "loss": epoch_loss,
-                    "avg_data_ms": (t_data / n_batches) * 1000.0,
-                    "avg_concat_ms": (t_concat / n_batches) * 1000.0,
-                    "avg_forward_ms": (t_forward / n_batches) * 1000.0,
-                    "avg_loss_ms": (t_loss / n_batches) * 1000.0,
-                    "avg_backward_ms": (t_backward / n_batches) * 1000.0,
-                    "avg_step_ms": (t_step / n_batches) * 1000.0,
-                }
-                tqdm.write(
-                    f"Epoch {epoch + 1} summary — loss: {summary['loss']:.4f} | "
-                    f"data {summary['avg_data_ms']:.1f}ms | concat {summary['avg_concat_ms']:.1f}ms | "
-                    f"fwd {summary['avg_forward_ms']:.1f}ms | back {summary['avg_backward_ms']:.1f}ms | step {summary['avg_step_ms']:.1f}ms"
-                )
+            # if n_batches > 0:
+            #     tqdm.write(
+            #         f"Epoch {epoch + 1} summary — loss: {summary['loss']:.4f} | "
+            #         f"data {summary['avg_data_ms']:.1f}ms | concat {summary['avg_concat_ms']:.1f}ms | "
+            #         f"fwd {summary['avg_forward_ms']:.1f}ms | back {summary['avg_backward_ms']:.1f}ms | step {summary['avg_step_ms']:.1f}ms"
+            #     )
+            if epoch_logger is not None:
+                try:
+                    epoch_logger(epoch, dict(summary))
+                except Exception:
+                    # keep training loop robust against logging issues
+                    pass
 
             if early_stopper and early_stopper.step(epoch_loss):
                 break
