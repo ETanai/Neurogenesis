@@ -1,5 +1,8 @@
 mlflow:
-  enabled: true
-  tracking_uri: http://localhost:5000
-  experiment_name: neurogenesis
-  run_name: ${now:%Y%m%d_%H%M%S}
+  enabled: true                       # flip off when MLflow server is unavailable
+  tracking_uri: http://localhost:5000 # address of the tracking server
+  experiment_name: neurogenesis       # groups runs under this experiment
+  run_name: ${now:%Y%m%d_%H%M%S}      # timestamped run names to avoid collisions
+  metric_filter:
+    include_prefixes: null            # optional whitelist: only log metrics with these prefixes.
+    exclude_prefixes: []              # optional blacklist evaluated when include_prefixes is null.

@@ -1,5 +1,9 @@
-input_dim: 784
-hidden_sizes: [200, 100, 60, 20]
-activation: relu
-activation_latent: identity
-activation_last: sigmoid
+# Neurogenesis autoencoder architecture.
+input_dim: 784                       # flattened 28x28 grayscale image
+hidden_sizes: [200, 100, 60, 20]     # encoder layer widths down to the latent space
+activation: relu                     # nonlinearity per hidden block; options: relu, tanh, leaky_relu, sigmoid, identity, sharp_sigmoid.
+activation_params: {}                # optional kwargs passed to the activation (e.g., {k: 5.0} for sharp_sigmoid).
+activation_latent: identity          # latent activation (same option set as above); identity keeps z linear.
+activation_latent_params: {}         # kwargs for the latent activation if needed.
+activation_last: sharp_sigmoid             # decoder output activation; same options, sigmoid keeps pixels in [0,1].
+activation_last_params: {10}           # kwargs for the decoder activation.

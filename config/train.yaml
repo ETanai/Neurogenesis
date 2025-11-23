@@ -1,10 +1,11 @@
+# Full training recipe assembled from modular Hydra configs.
 defaults:
-  - data: mnist
-  - model: ng_autoencoder
-  - experiment: mnist_incremental
-  - training: default
-  - neurogenesis: default
-  - replay: default
-  - logging: default
+  - data: mnist                # options: mnist, sd19, toy (see config/data/* for details).
+  - model: ng_autoencoder      # options: ng_autoencoder (ships with repo); add YAMLs for more.
+  - experiment: mnist_incremental   # available experiments live in config/experiment (currently this one).
+  - training: default          # only 'default' provided; create config/training/<name>.yaml to override.
+  - neurogenesis: default      # same pattern: add files under config/neurogenesis for extra presets.
+  - replay: default            # 'default' is the shipped IR preset; create config/replay/<name>.yaml for others.
+  - logging: default           # 'default' enables MLflow; add config/logging/<name>.yaml for alternatives.
 
-seed: 42
+seed: 42                       # base RNG seed for reproducibility

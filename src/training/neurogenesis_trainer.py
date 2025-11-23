@@ -186,6 +186,7 @@ class NeurogenesisTrainer:
 
     def learn_class(self, class_id: Any, loader: DataLoader) -> None:
         num_layers = len(self.ae.hidden_sizes)
+        sizes_before = list(self.ae.hidden_sizes)
         self.history[class_id] = {"layer_errors": [[] for _ in range(num_layers)]}
 
         # ---- log "class learned" ----
@@ -388,6 +389,13 @@ class NeurogenesisTrainer:
         # Refresh replay statistics with the now-updated encoder
         if self.ir is not None:
             self.ir.fit(loader)
+
+        if self.logger and sizes_before:
+            summary_metrics = {}
+            for idx, (before, after) in enumerate(zip(sizes_before, self.ae.hidden_sizes)):
+                summary_metrics[f"summary/layer_{idx}_growth_total"] = after - before
+                summary_metrics[f"summary/layer_{idx}_cumulative_size"] = after
+            self.logger.log_metrics(summary_metrics, step=self._class_count)
 
     def test_all_levels(self, loader: DataLoader) -> List[float]:
         """

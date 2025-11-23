@@ -1,4 +1,5 @@
-name: sd19
-batch_size: 64
-num_workers: 0
-data_dir: ${oc.env:SD19_DATA_DIR,./data}
+# SD-19 handwriting dataset parameters.
+name: sd19                               # dataset key; valid choices: mnist, sd19, toy.
+batch_size: 64                               # dataset is larger, so use smaller batches
+num_workers: 0                               # adjust upward if dataloader stalls
+data_dir: ${oc.env:SD19_DATA_DIR,./data}     # falls back to ./data when env var missing

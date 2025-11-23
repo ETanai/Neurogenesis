@@ -37,16 +37,40 @@ except ImportError:  # pragma: no cover - optional dependency
 
 
 class _MLflowLogger:
-    def __init__(self, *, tracking_uri: str, experiment_name: str, run_name: str) -> None:
+    def __init__(
+        self,
+        *,
+        tracking_uri: str,
+        experiment_name: str,
+        run_name: str,
+        metric_filter: dict | None = None,
+    ) -> None:
         if mlflow is None:
             raise RuntimeError("mlflow is not installed; disable MLflow logging or install mlflow.")
         mlflow.set_tracking_uri(tracking_uri)
         mlflow.set_experiment(experiment_name)
         self._run = mlflow.start_run(run_name=run_name)
+        filt = metric_filter or {}
+        include_prefixes = filt.get("include_prefixes") or []
+        exclude_prefixes = filt.get("exclude_prefixes") or []
+        self._include_prefixes: tuple[str, ...] = tuple(include_prefixes)
+        self._exclude_prefixes: tuple[str, ...] = tuple(exclude_prefixes)
+
+    def _should_log(self, key: str) -> bool:
+        if self._include_prefixes:
+            return any(key.startswith(prefix) for prefix in self._include_prefixes)
+        if self._exclude_prefixes and any(key.startswith(prefix) for prefix in self._exclude_prefixes):
+            return False
+        return True
 
     def log_metrics(self, metrics: dict, step: int | None = None) -> None:
-        for key, value in metrics.items():
-            mlflow.log_metric(key, float(value), step=step)
+        filtered = {
+            key: float(value)
+            for key, value in metrics.items()
+            if self._should_log(str(key))
+        }
+        if filtered:
+            mlflow.log_metrics(filtered, step=step)
 
     def log_params(self, params: dict) -> None:
         mlflow.log_params(params)
@@ -381,8 +405,21 @@ def _build_model(cfg: DictConfig, device: torch.device) -> NGAutoEncoder:
         input_dim=cfg.model.input_dim,
         hidden_sizes=list(cfg.model.hidden_sizes),
         activation=cfg.model.activation,
+        activation_params=OmegaConf.to_container(cfg.model.get("activation_params", {}), resolve=True)
+        if hasattr(cfg.model, "activation_params")
+        else None,
         activation_latent=cfg.model.activation_latent,
+        activation_latent_params=OmegaConf.to_container(
+            cfg.model.get("activation_latent_params", {}), resolve=True
+        )
+        if hasattr(cfg.model, "activation_latent_params")
+        else None,
         activation_last=cfg.model.activation_last,
+        activation_last_params=OmegaConf.to_container(
+            cfg.model.get("activation_last_params", {}), resolve=True
+        )
+        if hasattr(cfg.model, "activation_last_params")
+        else None,
     )
     return model.to(device)
 
@@ -574,6 +611,7 @@ def run(cfg: DictConfig) -> None:
             tracking_uri=mlflow_cfg.tracking_uri,
             experiment_name=mlflow_cfg.experiment_name,
             run_name=mlflow_cfg.run_name,
+            metric_filter=mlflow_cfg.get("metric_filter"),
         )
         logger.log_params(
             {

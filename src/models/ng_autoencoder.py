@@ -9,12 +9,24 @@ from torch.optim import AdamW
 
 from models.ng_linear import NGLinear  # <-- your custom layer
 
-_ACTS: dict[str, type[nn.Module]] = {
-    "relu": nn.ReLU,
-    "tanh": nn.Tanh,
-    "leaky_relu": partial(nn.LeakyReLU, negative_slope=0.1),
-    "sigmoid": nn.Sigmoid,
-    "identity": lambda: nn.Identity(),
+class SharpSigmoid(nn.Module):
+    """Sigmoid with adjustable slope parameter k."""
+
+    def __init__(self, k: float = 5.0) -> None:
+        super().__init__()
+        self.k = k
+
+    def forward(self, x: Tensor) -> Tensor:
+        return torch.sigmoid(self.k * x)
+
+
+_ACTS: dict[str, Callable[..., nn.Module]] = {
+    "relu": lambda **_: nn.ReLU(),
+    "tanh": lambda **_: nn.Tanh(),
+    "leaky_relu": lambda **cfg: nn.LeakyReLU(negative_slope=cfg.get("negative_slope", 0.1)),
+    "sigmoid": lambda **_: nn.Sigmoid(),
+    "identity": lambda **_: nn.Identity(),
+    "sharp_sigmoid": lambda **cfg: SharpSigmoid(k=cfg.get("k", 5.0)),
 }
 
 EpochSummary = Dict[str, Union[int, float, str]]
@@ -54,8 +66,11 @@ class NGAutoEncoder(nn.Module):
         input_dim: int,
         hidden_sizes: List[int],
         activation: str = "relu",
+        activation_params: Optional[dict] = None,
         activation_latent: str = "identity",
+        activation_latent_params: Optional[dict] = None,
         activation_last: str = "sigmoid",
+        activation_last_params: Optional[dict] = None,
     ):
         super().__init__()
         if not hidden_sizes:
@@ -63,30 +78,44 @@ class NGAutoEncoder(nn.Module):
 
         self.input_dim = input_dim
         self.hidden_sizes = list(hidden_sizes)
-        act_cls = _ACTS[activation]
-        act_lat_cls = _ACTS[activation_latent]
-        act_last_cls = _ACTS[activation_last]
+        def _normalize(params: Optional[dict]) -> dict:
+            if not params:
+                return {}
+            return {str(k): v for k, v in params.items()}
+
+        act_params = _normalize(activation_params)
+        act_lat_params = _normalize(activation_latent_params)
+        act_last_params = _normalize(activation_last_params)
+        if activation not in _ACTS:
+            raise KeyError(f"Unknown activation '{activation}'. Available: {list(_ACTS)}")
+        if activation_latent not in _ACTS:
+            raise KeyError(f"Unknown activation '{activation_latent}'. Available: {list(_ACTS)}")
+        if activation_last not in _ACTS:
+            raise KeyError(f"Unknown activation '{activation_last}'. Available: {list(_ACTS)}")
+        act_factory = _ACTS[activation]
+        act_lat_factory = _ACTS[activation_latent]
+        act_last_factory = _ACTS[activation_last]
 
         enc_layers: list[nn.Module] = []
         prev_dim = input_dim
         for h in self.hidden_sizes[:-1]:
             enc_layers.append(NGLinear(prev_dim, out_features_mature=h, out_features_plastic=0))
-            enc_layers.append(act_cls())
+            enc_layers.append(act_factory(**act_params))
             prev_dim = h
         enc_layers.append(
             NGLinear(prev_dim, out_features_mature=self.hidden_sizes[-1], out_features_plastic=0)
         )
-        enc_layers.append(act_lat_cls())
+        enc_layers.append(act_lat_factory(**act_lat_params))
         self.encoder = nn.Sequential(*enc_layers)
 
         dec_layers: list[nn.Module] = []
         prev_dim = self.hidden_sizes[-1]
         for h in reversed(self.hidden_sizes[:-1]):
             dec_layers.append(NGLinear(prev_dim, out_features_mature=h, out_features_plastic=0))
-            dec_layers.append(act_cls())
+            dec_layers.append(act_factory(**act_params))
             prev_dim = h
         dec_layers.append(NGLinear(prev_dim, out_features_mature=input_dim, out_features_plastic=0))
-        dec_layers.append(act_last_cls())
+        dec_layers.append(act_last_factory(**act_last_params))
         self.decoder = nn.Sequential(*dec_layers)
 
     def forward(self, x: Tensor) -> dict[str, Tensor]:

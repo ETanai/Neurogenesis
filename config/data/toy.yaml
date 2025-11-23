@@ -1,9 +1,10 @@
-name: toy
-batch_size: 16
-num_workers: 0
-data_dir: null
-num_classes: 4
-train_samples_per_class: 32
-val_samples_per_class: 16
-noise_scale: 0.05
-seed: 123
+# Procedurally generated dataset used for quick debugging.
+name: toy                         # dataset key; valid choices: mnist, sd19, toy.
+batch_size: 16                   # fewer samples keep training fast
+num_workers: 0                   # all samples are generated on the fly
+data_dir: null                   # no on-disk data to load
+num_classes: 4                   # number of synthetic labels
+train_samples_per_class: 32      # counts per class for the training split
+val_samples_per_class: 16        # counts per class for the validation split
+noise_scale: 0.05                # standard deviation of additive Gaussian noise
+seed: 123                        # ensures repeatable synthetic data

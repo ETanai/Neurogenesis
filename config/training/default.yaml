@@ -1,6 +1,7 @@
-pretrain_epochs: 20
-base_lr: 0.001
-weight_decay: 0.0
-device: auto
-validate: true
-incremental_epochs: 5
+# Optimization schedule shared across experiments.
+pretrain_epochs: 20        # epochs dedicated to fitting the base classes
+base_lr: 0.001             # Adam learning rate
+weight_decay: 0.0          # set >0 to regularize large weights
+device: auto               # torch.device string; auto|cpu|cuda|cuda:0|mps are typical choices.
+validate: true             # run validation after each epoch
+incremental_epochs: 5      # epochs spent learning each incremental class batch

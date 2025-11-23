@@ -1,13 +1,19 @@
+# Base Hydra defaults that select the core model and datamodule.
 defaults:
-  - model: ae
-  - datamodule: mnist
+  - model: ae              # options: ae (baseline AE) or ng_autoencoder (neurogenesis).
+  - datamodule: mnist      # dataset key; choose among mnist, sd19, or toy datamodules.
 
+# Global trainer knobs applied to every run.
 trainer:
-  max_epochs: 3
-  accelerator: auto        # cpu or gpu picked automatically
-  log_every_n_steps: 20
+  max_epochs: 3            # total epochs for the main training loop
+  accelerator: auto        # Lightning accelerator flag (auto|cpu|cuda|gpu|mps|tpu, etc.)
+  log_every_n_steps: 20    # frequency of logging batches to Lightning
+
+# Intrinsic replay (IR) settings shared by most configs.
 ir:
-  enabled: true
-  n_samples_per_class: 16
+  enabled: true            # master switch for IR sampling
+  n_samples_per_class: 16  # number of replay samples stored per class
+
+# Default MLflow endpoint used by logging configs.
 mlflow:
-  tracking_uri: "http://localhost:5000"
+  tracking_uri: "http://localhost:5000"  # point to any MLflow tracking URI
