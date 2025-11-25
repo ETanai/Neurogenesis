@@ -117,6 +117,7 @@ class NGAutoEncoder(nn.Module):
         dec_layers.append(NGLinear(prev_dim, out_features_mature=input_dim, out_features_plastic=0))
         dec_layers.append(act_last_factory(**act_last_params))
         self.decoder = nn.Sequential(*dec_layers)
+        self.update_steps = 0
 
     def forward(self, x: Tensor) -> dict[str, Tensor]:
         x_flat = x.view(x.size(0), -1)
@@ -153,6 +154,9 @@ class NGAutoEncoder(nn.Module):
         for m in self.decoder.modules():
             if hasattr(m, "parameters_mature"):
                 yield from m.parameters_mature()
+
+    def reset_update_counter(self) -> None:
+        self.update_steps = 0
 
     def forward_partial(self, x: Tensor, layer_idx: int, ret_lat: bool = False) -> Tensor:
         x_flat = x.view(x.size(0), -1)
@@ -492,6 +496,7 @@ class NGAutoEncoder(nn.Module):
                 # -- step timing --
                 t0 = perf_counter()
                 optim.step()
+                self.update_steps += 1
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
                 t1 = perf_counter()

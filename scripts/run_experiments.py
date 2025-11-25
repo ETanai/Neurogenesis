@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import csv
 import inspect
+import math
 import tempfile
 import time
 from pathlib import Path
-from typing import List, Sequence
+from typing import Dict, List, Sequence
 
 import hydra
 import torch
@@ -147,7 +148,25 @@ class _NullLogger:
         return None
 
 
-def _instantiate_datamodule(cfg: DictConfig) -> MNISTDataModule:
+def _apply_experiment_model_overrides(cfg: DictConfig) -> None:
+    exp_model = cfg.experiment.get("model") if hasattr(cfg.experiment, "get") else None
+    if exp_model:
+        cfg.model = OmegaConf.merge(cfg.model, exp_model)
+
+
+def _infer_image_side(model_cfg: DictConfig) -> int | None:
+    input_dim = getattr(model_cfg, "input_dim", None)
+    if input_dim is None:
+        return None
+    side = int(math.isqrt(int(input_dim)))
+    if side * side != int(input_dim):
+        raise ValueError(
+            f"Model input_dim={input_dim} is not a perfect square; cannot infer image side."
+        )
+    return side
+
+
+def _instantiate_datamodule(cfg: DictConfig, model_cfg: DictConfig) -> MNISTDataModule:
     name = cfg.name
     if name == "mnist":
         dm = MNISTDataModule(
@@ -158,10 +177,18 @@ def _instantiate_datamodule(cfg: DictConfig) -> MNISTDataModule:
     elif name == "sd19":
         from data.sd19_datamodule import SD19DataModule  # lazy import
 
+        image_size = cfg.get("image_size", None)
+        if image_size is None:
+            image_size = _infer_image_side(model_cfg)
+
         dm = SD19DataModule(
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             data_dir=cfg.data_dir,
+            download=cfg.get("download", True),
+            download_url=cfg.get("download_url", None),
+            download_root=cfg.get("download_root", None),
+            image_size=image_size,
         )
     elif name == "toy":
         from data.toy_datamodule import ToyDataModule  # lazy import
@@ -400,6 +427,35 @@ def _log_replay_stats(replay: IntrinsicReplay | None, logger, step: int) -> None
         logger.log_dict(weights, "replay/class_weights.json")
 
 
+def _log_training_stats(logger, stats: Dict[str, int]) -> None:
+    if isinstance(logger, _NullLogger):
+        return
+    payload = {f"stats/{key}": float(value) for key, value in stats.items()}
+    logger.log_metrics(payload, step=0)
+
+
+def _log_experiment_identity(logger, cfg: DictConfig) -> None:
+    """Record dataset/regime metadata and class curricula as metrics."""
+    if isinstance(logger, _NullLogger):
+        return
+    metrics: dict[str, float] = {}
+    dataset = str(cfg.experiment.get("dataset", cfg.data.get("name", "unknown")))
+    regime = str(cfg.experiment.get("regime", "unknown"))
+    metrics[f"config/dataset/{dataset}"] = 1.0
+    metrics[f"config/regime/{regime}"] = 1.0
+
+    base_classes = cfg.experiment.get("base_classes") or []
+    for idx, cls in enumerate(base_classes):
+        metrics[f"config/pretrain_class/{idx}"] = float(cls)
+
+    incr_classes = cfg.experiment.get("incremental_classes") or []
+    for idx, cls in enumerate(incr_classes):
+        metrics[f"config/neurogenesis_class/{idx}"] = float(cls)
+
+    if metrics:
+        logger.log_metrics(metrics, step=0)
+
+
 def _build_model(cfg: DictConfig, device: torch.device) -> NGAutoEncoder:
     model = NGAutoEncoder(
         input_dim=cfg.model.input_dim,
@@ -499,7 +555,7 @@ def _bootstrap_replay(
 
 def _pretrain(
     model: NGAutoEncoder, dm: MNISTDataModule, cfg: DictConfig, device: torch.device, logger
-) -> None:
+) -> AutoencoderPretrainer:
     base_classes = cfg.experiment.base_classes
     train_subset = _get_combined_dataset(dm, base_classes, split="train")
     train_loader = _train_loader_for_classes(dm, base_classes, shuffle=True)
@@ -538,6 +594,7 @@ def _pretrain(
 
     trainer.fit(train_loader, val_loader=val_loader, log_fn=logger.log_metrics)
     logger.log_metrics({"timing/pretrain_total_sec": time.perf_counter() - t0})
+    return trainer
 
 
 def _evaluate(
@@ -602,7 +659,16 @@ def run(cfg: DictConfig) -> None:
     _seed_everything(cfg.seed)
     device = _prep_device(cfg)
 
-    dm = _instantiate_datamodule(cfg.data)
+    _apply_experiment_model_overrides(cfg)
+
+    training_stats = {
+        "pretrain_parameter_updates": 0,
+        "neurogenesis_parameter_updates": 0,
+        "incremental_parameter_updates": 0,
+        "total_parameter_updates": 0,
+    }
+
+    dm = _instantiate_datamodule(cfg.data, cfg.model)
     mlflow_cfg = cfg.logging.mlflow
     if mlflow_cfg.enabled and mlflow is None:
         print("[WARN] mlflow not available; disabling MLflow logging for this run.")
@@ -625,11 +691,15 @@ def run(cfg: DictConfig) -> None:
     else:
         logger = _NullLogger()
 
+    _log_experiment_identity(logger, cfg)
+
     model = _build_model(cfg, device)
 
     t_pre0 = time.perf_counter()
-    _pretrain(model, dm, cfg, device, logger)
+    pretrainer = _pretrain(model, dm, cfg, device, logger)
     logger.log_metrics({"timing/pretrain_sec": time.perf_counter() - t_pre0})
+    training_stats["pretrain_parameter_updates"] = getattr(pretrainer, "update_steps", 0)
+    model.reset_update_counter()
 
     use_neurogenesis, use_replay = _resolve_regime(cfg)
 
@@ -737,10 +807,21 @@ def run(cfg: DictConfig) -> None:
             {"timing/recon_artifacts_sec": time.perf_counter() - t_fig0}, step=len(learned)
         )
 
+    if use_neurogenesis:
+        training_stats["neurogenesis_parameter_updates"] = getattr(model, "update_steps", 0)
+    else:
+        training_stats["incremental_parameter_updates"] = getattr(trainer, "update_steps", 0)
+    training_stats["total_parameter_updates"] = (
+        training_stats["pretrain_parameter_updates"]
+        + training_stats["neurogenesis_parameter_updates"]
+        + training_stats["incremental_parameter_updates"]
+    )
+    _log_training_stats(logger, training_stats)
+
     _log_eval_records(eval_records, logger)
     logger.log_metrics({"timing/total_run_sec": time.perf_counter() - t_run0})
     logger.finish()
-    return {"model": model, "trainer": trainer, "replay": replay}
+    return {"model": model, "trainer": trainer, "replay": replay, "training_stats": training_stats}
 
 
 @hydra.main(version_base=None, config_path="../config", config_name="train")

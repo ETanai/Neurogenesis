@@ -1,12 +1,19 @@
 import json
+import shutil
+import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
+from urllib.error import URLError
+from urllib.request import urlopen
 
+from PIL import Image
 import pytorch_lightning as pl
 import torch
 from torch.utils.data import DataLoader, Sampler, Subset
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
+
+DEFAULT_SD19_URL = "https://s3.amazonaws.com/nist-srd/SD19/by_class.zip"
 
 
 class SD19ImageFolder(ImageFolder):
@@ -28,7 +35,10 @@ class _ListSampler(Sampler[int]):
         self.set(indices)
 
     def set(self, indices: Sequence[int]) -> None:
-        self.indices = list(indices)
+        idxs = list(indices)
+        self.indices = idxs
+        # Maintain compatibility with helpers expecting `sampler.idxs`.
+        self.idxs = idxs
 
     def __iter__(self):
         return iter(self.indices)
@@ -52,7 +62,7 @@ class SD19DataModule(pl.LightningDataModule):
 
     def __init__(
         self,
-        data_dir: str = "./by_class",
+        data_dir: str = "./data/SD19/by_class",
         batch_size: int = 128,
         num_workers: int = 4,
         classes: Sequence[int] | None = None,
@@ -62,11 +72,19 @@ class SD19DataModule(pl.LightningDataModule):
         default_per_class_limit_train: Optional[int] = None,
         default_per_class_limit_val: Optional[int] = None,
         index_seed: int = 42,
+        download: bool = True,
+        download_url: str | None = DEFAULT_SD19_URL,
+        download_root: Optional[str] = None,
     ):
+        if download_url is None:
+            download_url = DEFAULT_SD19_URL
+        if download_root is None:
+            download_root = str(Path(data_dir).parent)
         super().__init__()
         self.save_hyperparameters()
         self.index_seed = index_seed
         self.class_to_indices: Dict[int, List[int]] = {}
+        self._offline_resize_done = False
 
         # define transforms once (will be rebuilt in setup for image_size)
         self.train_tfms = transforms.Compose([transforms.RandomRotation(10), transforms.ToTensor()])
@@ -151,6 +169,7 @@ class SD19DataModule(pl.LightningDataModule):
     # ---------- Lightning hooks ----------
 
     def setup(self, stage=None):
+        self._ensure_dataset_ready()
         # build transforms here so they see image_size
         self.train_tfms = self._make_tfms(train=True)
         self.val_tfms = self._make_tfms(train=False)
@@ -309,7 +328,7 @@ class SD19DataModule(pl.LightningDataModule):
 
     def _make_tfms(self, train: bool):
         tfms = []
-        if self.hparams.image_size is not None:
+        if self.hparams.image_size is not None and not self._offline_resize_done:
             tfms.append(transforms.Resize((self.hparams.image_size, self.hparams.image_size)))
         if train:
             tfms += [transforms.RandomRotation(10), transforms.ToTensor()]
@@ -348,6 +367,78 @@ class SD19DataModule(pl.LightningDataModule):
         except Exception:
             pass
         return samples, class_to_idx
+
+    # ---------- download helpers ----------
+
+    def _ensure_dataset_ready(self) -> None:
+        root = Path(self.hparams.data_dir)
+        if root.exists() and any(root.iterdir()):
+            self._prepare_image_resolution(root)
+            return
+
+        if not bool(self.hparams.download):
+            raise FileNotFoundError(
+                f"SD-19 data directory '{root}' is missing and automatic download is disabled."
+            )
+
+        url = self.hparams.download_url or DEFAULT_SD19_URL
+        target_root = Path(self.hparams.download_root)
+        target_root.mkdir(parents=True, exist_ok=True)
+        archive_path = target_root / Path(url).name
+
+        if not archive_path.exists():
+            self._download_archive(url, archive_path)
+        self._extract_archive(archive_path, target_root)
+
+        if not root.exists() or not any(root.iterdir()):
+            raise FileNotFoundError(
+                f"Failed to locate SD-19 data at '{root}' after extracting {archive_path}."
+            )
+        self._prepare_image_resolution(root)
+
+    def _download_archive(self, url: str, dest: Path) -> None:
+        try:
+            with urlopen(url) as response, open(dest, "wb") as fh:
+                shutil.copyfileobj(response, fh)
+        except URLError as err:  # pragma: no cover - network errors hard to unit test
+            raise RuntimeError(f"Unable to download SD-19 archive from {url}: {err}") from err
+
+    def _extract_archive(self, archive_path: Path, target_root: Path) -> None:
+        try:
+            with zipfile.ZipFile(archive_path) as zf:
+                zf.extractall(target_root)
+        except zipfile.BadZipFile as err:
+            raise RuntimeError(
+                f"SD-19 archive '{archive_path}' is corrupted or not a valid zip file."
+            ) from err
+
+    def _prepare_image_resolution(self, root: Path) -> None:
+        size = self.hparams.image_size
+        if size is None:
+            return
+        marker = root / f".resized_{size}.done"
+        if marker.exists():
+            self._offline_resize_done = True
+            return
+        if not root.exists():
+            raise FileNotFoundError(f"Cannot resize SD-19 images; '{root}' does not exist.")
+
+        supported_suffixes = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.suffix.lower() not in supported_suffixes:
+                continue
+            self._resize_image_file(path, size)
+        marker.write_text("ok", encoding="utf-8")
+        self._offline_resize_done = True
+
+    def _resize_image_file(self, path: Path, size: int) -> None:
+        with Image.open(path) as img:
+            img = img.convert("L")
+            if img.size != (size, size):
+                img = img.resize((size, size), Image.LANCZOS)
+            img.save(path)
 
 
 class _TransformedView(torch.utils.data.Dataset):

@@ -36,6 +36,7 @@ class AutoencoderPretrainer:
         self.optimizer = torch.optim.Adam(
             self.model.parameters(), lr=config.lr, weight_decay=config.weight_decay
         )
+        self.update_steps = 0
 
     def fit(
         self,
@@ -87,6 +88,7 @@ class AutoencoderPretrainer:
                     self.optimizer.zero_grad(set_to_none=True)
                     loss.backward()
                     self.optimizer.step()
+                    self.update_steps += 1
 
                 # accumulate without synchronizing to CPU each step
                 loss_sum = loss_sum + loss.detach()

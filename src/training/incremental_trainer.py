@@ -46,6 +46,7 @@ class IncrementalTrainer:
 
         self.history: Dict[int, Dict[str, List[float]]] = {}
         self._class_count = 0
+        self.update_steps = 0
 
     # ------------------------------------------------------------------
     def _model_device(self) -> torch.device:
@@ -101,6 +102,7 @@ class IncrementalTrainer:
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
                 optimizer.step()
+                self.update_steps += 1
 
                 losses.append(float(loss.detach().cpu().item()))
 

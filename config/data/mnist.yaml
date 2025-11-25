@@ -1,5 +1,6 @@
 # Canonical MNIST datamodule parameters.
-name: mnist                            # dataset key; valid choices: mnist, sd19, toy.
-batch_size: 128                        # per-device batch size
-num_workers: 0                         # keep 0 for reproducibility on laptops
-data_dir: ${oc.env:MNIST_DATA_DIR,./data}  # optional override via environment var
+name: mnist                                # dataset key; valid choices: mnist, sd19, toy.
+batch_size: 128                            # per-device batch size
+num_workers: 0                             # keep 0 for reproducibility on laptops
+data_dir: ${oc.env:MNIST_DATA_DIR,./data/MNIST}  # dataset-specific download/cache directory
+download_root: ${oc.env:MNIST_DOWNLOAD_DIR,./data/MNIST}

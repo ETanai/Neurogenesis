@@ -13,3 +13,6 @@ threshold:
 evaluation:
   batch_size: null                          # fall back to datamodule batch size
   val_split: true                           # keep a validation split for reporting
+
+model:
+  hidden_sizes: [200, 100, 75, 20]          # override default architecture per paper

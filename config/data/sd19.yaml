@@ -1,5 +1,8 @@
 # SD-19 handwriting dataset parameters.
 name: sd19                               # dataset key; valid choices: mnist, sd19, toy.
-batch_size: 64                               # dataset is larger, so use smaller batches
+batch_size: 254                               # dataset is larger, so use smaller batches
 num_workers: 0                               # adjust upward if dataloader stalls
-data_dir: ${oc.env:SD19_DATA_DIR,./data}     # falls back to ./data when env var missing
+data_dir: ${oc.env:SD19_DATA_DIR,./data/SD19/by_class}  # expected root of the by_class folders
+download: true                               # automatically download if missing
+download_url: https://s3.amazonaws.com/nist-srd/SD19/by_class.zip
+download_root: ${oc.env:SD19_DOWNLOAD_DIR,./data/SD19}  # directory where the archive is unpacked
