@@ -1,8 +1,14 @@
 # SD-19 handwriting dataset parameters.
 name: sd19                               # dataset key; valid choices: mnist, sd19, toy.
-batch_size: 254                               # dataset is larger, so use smaller batches
+batch_size: 128                               # dataset is larger, so use smaller batches
 num_workers: 0                               # adjust upward if dataloader stalls
 data_dir: ${oc.env:SD19_DATA_DIR,./data/SD19/by_class}  # expected root of the by_class folders
 download: true                               # automatically download if missing
 download_url: https://s3.amazonaws.com/nist-srd/SD19/by_class.zip
 download_root: ${oc.env:SD19_DOWNLOAD_DIR,./data/SD19}  # directory where the archive is unpacked
+offline_resize: true                         # resize every image on disk once; set false to rely on transforms instead
+resize_progress_bar: true                    # show a tqdm progress bar while running the offline resize
+resize_progress_min_files: 500               # require at least this many files before enabling the progress bar
+val_split: 0.2                               # fraction of data reserved for validation
+default_per_class_limit_train: null          # cap train samples per class (null keeps all); useful for quick prototyping
+default_per_class_limit_val: null            # cap val samples per class for balanced validation

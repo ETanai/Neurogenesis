@@ -1,5 +1,5 @@
 # Optimization schedule shared across experiments.
-pretrain_epochs: 20        # epochs dedicated to fitting the base classes
+pretrain_epochs: 5        # epochs dedicated to fitting the base classes
 base_lr: 0.001             # Adam learning rate
 weight_decay: 0.0          # set >0 to regularize large weights
 device: auto               # torch.device string; auto|cpu|cuda|cuda:0|mps are typical choices.

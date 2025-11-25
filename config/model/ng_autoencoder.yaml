@@ -6,4 +6,4 @@ activation_params: {}                # optional kwargs passed to the activation 
 activation_latent: identity          # latent activation (same option set as above); identity keeps z linear.
 activation_latent_params: {}         # kwargs for the latent activation if needed.
 activation_last: sharp_sigmoid             # decoder output activation; same options, sigmoid keeps pixels in [0,1].
-activation_last_params: {10}           # kwargs for the decoder activation.
+activation_last_params: {1}           # kwargs for the decoder activation.

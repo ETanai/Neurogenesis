@@ -12,6 +12,7 @@ import torch
 from torch.utils.data import DataLoader, Sampler, Subset
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
+from tqdm import tqdm
 
 DEFAULT_SD19_URL = "https://s3.amazonaws.com/nist-srd/SD19/by_class.zip"
 
@@ -75,6 +76,9 @@ class SD19DataModule(pl.LightningDataModule):
         download: bool = True,
         download_url: str | None = DEFAULT_SD19_URL,
         download_root: Optional[str] = None,
+        offline_resize: bool = True,
+        resize_progress_bar: bool = True,
+        resize_progress_min_files: int = 500,
     ):
         if download_url is None:
             download_url = DEFAULT_SD19_URL
@@ -85,6 +89,10 @@ class SD19DataModule(pl.LightningDataModule):
         self.index_seed = index_seed
         self.class_to_indices: Dict[int, List[int]] = {}
         self._offline_resize_done = False
+        self._offline_resize_enabled = bool(offline_resize)
+        self._resize_progress_min_files = max(0, int(resize_progress_min_files))
+        self._resize_progress_bar = bool(resize_progress_bar)
+        self._split_index_sets: Dict[str, set] = {"train": set(), "val": set()}
 
         # define transforms once (will be rebuilt in setup for image_size)
         self.train_tfms = transforms.Compose([transforms.RandomRotation(10), transforms.ToTensor()])
@@ -116,6 +124,7 @@ class SD19DataModule(pl.LightningDataModule):
         per_class_limit: Optional[int] = None,
         max_total: Optional[int] = None,
         seed: Optional[int] = None,
+        split: Optional[str] = None,
     ) -> List[int]:
         """
         Select indices for given classes with optional per-class and total limits.
@@ -126,10 +135,22 @@ class SD19DataModule(pl.LightningDataModule):
         if not class_ids:
             return []
 
+        seed_val = int(seed) if seed is not None else None
+        g_lists = self._rng(seed_val + 1) if seed_val is not None else None
+
         # start from cached per-class lists (already shuffled deterministically in setup)
         per_class_lists = []
         for c in class_ids:
             lst = self.class_to_indices.get(int(c), [])
+            if split is not None:
+                split_key = str(split)
+                allowed = self._split_index_sets.get(split_key)
+                if allowed is None:
+                    raise ValueError(f"Unknown split '{split}'. Expected 'train' or 'val'.")
+                lst = [idx for idx in lst if idx in allowed]
+            if g_lists is not None and len(lst) > 1:
+                perm = torch.randperm(len(lst), generator=g_lists).tolist()
+                lst = [lst[j] for j in perm]
             if per_class_limit is not None and per_class_limit > 0:
                 lst = lst[:per_class_limit]
             per_class_lists.append(lst)
@@ -143,7 +164,7 @@ class SD19DataModule(pl.LightningDataModule):
         # re-shuffle order of classes deterministically if a seed is provided
         order = list(range(len(per_class_lists)))
         if len(order) > 1:
-            g = self._rng(seed)
+            g = self._rng(seed_val + 2 if seed_val is not None else None)
             perm = torch.randperm(len(order), generator=g).tolist()
             order = [order[j] for j in perm]
 
@@ -221,8 +242,13 @@ class SD19DataModule(pl.LightningDataModule):
                     per_class_count[lbl] = cnt + 1
             val_idx = torch.tensor(selected, dtype=torch.long)
 
-        self.train_sampler = _ListSampler(train_idx.tolist())
-        self.val_sampler = _ListSampler(val_idx.tolist())
+        train_idx_list = train_idx.tolist()
+        val_idx_list = val_idx.tolist()
+        self._split_index_sets["train"] = set(train_idx_list)
+        self._split_index_sets["val"] = set(val_idx_list)
+
+        self.train_sampler = _ListSampler(train_idx_list)
+        self.val_sampler = _ListSampler(val_idx_list)
 
         # datasets WITH transforms
         train_ds = _TransformedView(self.full, self.train_tfms)
@@ -260,16 +286,12 @@ class SD19DataModule(pl.LightningDataModule):
         seed: Optional[int] = None,
     ) -> DataLoader:
         """Switch train loader to only that class (optionally limit samples)."""
-        full_list = self.class_to_indices.get(int(class_id), [])
-        if limit is not None and limit > 0:
-            # deterministic subselect
-            g = self._rng(seed)
-            if len(full_list) > 1:
-                perm = torch.randperm(len(full_list), generator=g).tolist()
-                full_list = [full_list[j] for j in perm]
-            idxs = full_list[:limit]
-        else:
-            idxs = full_list
+        idxs = self._select_indices_for_classes(
+            [class_id],
+            per_class_limit=limit,
+            seed=seed,
+            split="train",
+        )
         self.train_sampler.set(idxs)
         return self._train_loader
 
@@ -282,7 +304,11 @@ class SD19DataModule(pl.LightningDataModule):
     ) -> DataLoader:
         """Switch train loader to multiple classes with optional caps."""
         idxs = self._select_indices_for_classes(
-            class_ids, per_class_limit=per_class_limit, max_total=max_total, seed=seed
+            class_ids,
+            per_class_limit=per_class_limit,
+            max_total=max_total,
+            seed=seed,
+            split="train",
         )
         self.train_sampler.set(idxs)
         return self._train_loader
@@ -294,16 +320,18 @@ class SD19DataModule(pl.LightningDataModule):
         class_id: int,
         limit: Optional[int] = None,
         seed: Optional[int] = None,
-        use_val_transforms: bool = True,
+        split: str = "train",
+        use_val_transforms: Optional[bool] = None,
     ) -> Subset:
         """Return a Subset for a single class (optionally limited)."""
-        lst = self.class_to_indices.get(int(class_id), [])
-        if limit is not None and limit > 0:
-            g = self._rng(seed)
-            if len(lst) > 1:
-                perm = torch.randperm(len(lst), generator=g).tolist()
-                lst = [lst[j] for j in perm]
-            lst = lst[:limit]
+        lst = self._select_indices_for_classes(
+            [class_id],
+            per_class_limit=limit,
+            seed=seed,
+            split=split,
+        )
+        if use_val_transforms is None:
+            use_val_transforms = split != "train"
         transform = self.val_tfms if use_val_transforms else self.train_tfms
         ds = SD19ImageFolder(self.hparams.data_dir, transform=transform)
         return Subset(ds, lst)
@@ -314,12 +342,19 @@ class SD19DataModule(pl.LightningDataModule):
         per_class_limit: Optional[int] = None,
         max_total: Optional[int] = None,
         seed: Optional[int] = None,
-        use_val_transforms: bool = True,
+        split: str = "train",
+        use_val_transforms: Optional[bool] = None,
     ) -> Subset:
         """Return a Subset for multiple classes (optionally limited)."""
         idxs = self._select_indices_for_classes(
-            class_ids, per_class_limit=per_class_limit, max_total=max_total, seed=seed
+            class_ids,
+            per_class_limit=per_class_limit,
+            max_total=max_total,
+            seed=seed,
+            split=split,
         )
+        if use_val_transforms is None:
+            use_val_transforms = split != "train"
         transform = self.val_tfms if use_val_transforms else self.train_tfms
         ds = SD19ImageFolder(self.hparams.data_dir, transform=transform)
         return Subset(ds, idxs)
@@ -416,6 +451,8 @@ class SD19DataModule(pl.LightningDataModule):
         size = self.hparams.image_size
         if size is None:
             return
+        if not self._offline_resize_enabled:
+            return
         marker = root / f".resized_{size}.done"
         if marker.exists():
             self._offline_resize_done = True
@@ -424,12 +461,35 @@ class SD19DataModule(pl.LightningDataModule):
             raise FileNotFoundError(f"Cannot resize SD-19 images; '{root}' does not exist.")
 
         supported_suffixes = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
-        for path in root.rglob("*"):
-            if not path.is_file():
-                continue
-            if path.suffix.lower() not in supported_suffixes:
-                continue
-            self._resize_image_file(path, size)
+
+        def _iter_supported():
+            for path in root.rglob("*"):
+                if not path.is_file():
+                    continue
+                if path.suffix.lower() not in supported_suffixes:
+                    continue
+                yield path
+
+        iterator = _iter_supported()
+        progress_bar = None
+        if self._resize_progress_bar:
+            total = sum(1 for _ in _iter_supported())
+            if total >= self._resize_progress_min_files:
+                iterator = tqdm(
+                    iterator,
+                    total=total,
+                    desc=f"Resizing SD-19 images to {size}px",
+                    unit="img",
+                    leave=False,
+                )
+                progress_bar = iterator
+
+        try:
+            for path in iterator:
+                self._resize_image_file(path, size)
+        finally:
+            if progress_bar is not None:
+                progress_bar.close()
         marker.write_text("ok", encoding="utf-8")
         self._offline_resize_done = True
 

@@ -185,10 +185,16 @@ def _instantiate_datamodule(cfg: DictConfig, model_cfg: DictConfig) -> MNISTData
             batch_size=cfg.batch_size,
             num_workers=cfg.num_workers,
             data_dir=cfg.data_dir,
+            val_split=cfg.get("val_split", 0.2),
             download=cfg.get("download", True),
             download_url=cfg.get("download_url", None),
             download_root=cfg.get("download_root", None),
             image_size=image_size,
+            offline_resize=cfg.get("offline_resize", True),
+            resize_progress_bar=cfg.get("resize_progress_bar", True),
+            resize_progress_min_files=cfg.get("resize_progress_min_files", 500),
+            default_per_class_limit_train=cfg.get("default_per_class_limit_train", None),
+            default_per_class_limit_val=cfg.get("default_per_class_limit_val", None),
         )
     elif name == "toy":
         from data.toy_datamodule import ToyDataModule  # lazy import
