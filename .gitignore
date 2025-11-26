@@ -4,6 +4,7 @@
 # 2. Un-ignore all directories so Git can recurse
 !*/
 !*/config/*
+!config/**
 
 # 3. Un-ignore any .py files
 !*.py

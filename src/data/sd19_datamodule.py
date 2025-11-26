@@ -2,7 +2,7 @@ import json
 import shutil
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Union, Tuple
 from urllib.error import URLError
 from urllib.request import urlopen
 
@@ -95,7 +95,7 @@ class SD19DataModule(pl.LightningDataModule):
         self._split_index_sets: Dict[str, set] = {"train": set(), "val": set()}
 
         # define transforms once (will be rebuilt in setup for image_size)
-        self.train_tfms = transforms.Compose([transforms.RandomRotation(10), transforms.ToTensor()])
+        self.train_tfms = transforms.ToTensor() #transforms.Compose([transforms.RandomRotation(10), transforms.ToTensor()])
         self.val_tfms = transforms.ToTensor()
 
     # ---------- utilities ----------
@@ -366,7 +366,8 @@ class SD19DataModule(pl.LightningDataModule):
         if self.hparams.image_size is not None and not self._offline_resize_done:
             tfms.append(transforms.Resize((self.hparams.image_size, self.hparams.image_size)))
         if train:
-            tfms += [transforms.RandomRotation(10), transforms.ToTensor()]
+            # tfms += [transforms.RandomRotation(10), transforms.ToTensor()]
+            tfms.append(transforms.ToTensor())
         else:
             tfms.append(transforms.ToTensor())
         return transforms.Compose(tfms)
@@ -500,6 +501,116 @@ class SD19DataModule(pl.LightningDataModule):
                 img = img.resize((size, size), Image.LANCZOS)
             img.save(path)
 
+    def make_class_balanced_batch(
+        self,
+        classes: Sequence[int],
+        samples_per_class: int,
+        *,
+        split: str = "train",
+        device: torch.device | None = None,
+        shuffle: bool = True,
+        seed: int | None = None,
+        allow_replacement: bool = False,
+        return_labels: bool = True,
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor, list[int]]]:
+        """
+        Build a batch with equal #samples per class, ordered by the 'classes' list.
+
+        Returns:
+            x: Tensor [B, C, H, W]
+            y: LongTensor [B]
+            splits: cumulative column counts after each class block
+        """
+        assert split in {"train", "val"}
+
+        # choose dataset view based on split
+        if split == "train":
+            ds = _TransformedView(self.full, self.train_tfms)
+            allowed = self._split_index_sets["train"]
+        else:
+            ds = _TransformedView(self.full, self.val_tfms)
+            allowed = self._split_index_sets["val"]
+
+        targets = torch.tensor(self.full.targets, dtype=torch.long)
+        dev = device if device is not None else torch.device("cpu")
+
+        g = None
+        if seed is not None:
+            g = torch.Generator()
+            g.manual_seed(int(seed))
+
+        imgs: list[torch.Tensor] = []
+        labels: list[int] = []
+        splits: list[int] = []
+        total = 0
+
+        # lazy import in case PIL images appear
+        try:
+            from torchvision.transforms.functional import to_tensor as _to_tensor
+        except Exception:
+            _to_tensor = None
+
+        for c in classes:
+            # class-specific indices intersected with the split index set
+            idxs = (targets == int(c)).nonzero(as_tuple=True)[0]
+            idxs = [i for i in idxs.tolist() if i in allowed]
+
+            n_avail = len(idxs)
+            if n_avail == 0:
+                raise ValueError(f"No samples for class {c} in split='{split}'.")
+
+            if samples_per_class > n_avail and not allow_replacement:
+                raise ValueError(
+                    f"Requested {samples_per_class} samples for class {c}, "
+                    f"but only {n_avail} available. "
+                    f"Use allow_replacement=True for replacement sampling."
+                )
+
+            if samples_per_class <= n_avail:
+                if shuffle:
+                    perm = (torch.randperm(n_avail, generator=g)
+                            if g is not None
+                            else torch.randperm(n_avail))
+                    chosen = [idxs[i] for i in perm[:samples_per_class].tolist()]
+                else:
+                    chosen = idxs[:samples_per_class]
+            else:
+                # replacement sampling
+                draw = torch.randint(0, n_avail, (samples_per_class,), generator=g)
+                chosen = [idxs[i] for i in draw.tolist()]
+
+            for idx in chosen:
+                x_i, y_i = ds[idx]
+
+                # convert PIL → tensor
+                if not isinstance(x_i, torch.Tensor):
+                    if _to_tensor is None:
+                        raise TypeError("Dataset returned PIL image and torchvision is unavailable.")
+                    x_i = _to_tensor(x_i)
+
+                x_i = x_i.float()
+
+                # ensure shape [C,H,W]
+                if x_i.ndim == 2:
+                    x_i = x_i.unsqueeze(0)
+
+                # normalize 0..255 → 0..1 if needed
+                if x_i.max() > 1.0:
+                    x_i = x_i / 255.0
+
+                imgs.append(x_i)
+                labels.append(int(y_i))
+
+            total += samples_per_class
+            splits.append(total)
+
+        x_batch = torch.stack(imgs, dim=0).to(dev, non_blocking=True)
+
+        if return_labels:
+            y_batch = torch.as_tensor(labels, dtype=torch.long, device=dev)
+            return x_batch, y_batch, splits
+
+        return x_batch
 
 class _TransformedView(torch.utils.data.Dataset):
     """Shares the same samples list; only changes the transform used at __getitem__ time."""

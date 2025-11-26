@@ -2,7 +2,7 @@
 dataset: mnist                              # dataset key; pick mnist, sd19, or toy (see config/data/*).
 regime: ndl_ir                              # options: ndl_ir (neurogenesis+IR), ndl (neurogenesis only),
                                             #          cl_ir (classical + IR), cl (classical without replay).
-base_classes: [1, 7]                        # seed classes trained before neurogenesis
+base_classes: [1,7]                        # seed classes trained before neurogenesis
 incremental_classes: [0, 2, 3, 4, 5, 6, 8, 9]  # stream of classes introduced later
 
 threshold:

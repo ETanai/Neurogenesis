@@ -496,6 +496,8 @@ def _collect_thresholds(
     )
     estimator = ThresholdEstimator(model, config=thresh_cfg)
     t0 = time.perf_counter()
+    loader = tqdm(
+        loader,"Threshold Estimation", leave=True)
     vals = estimator.estimate(loader)
     if logger is not None:
         logger.log_metrics({"timing/threshold_estimation_sec": time.perf_counter() - t0})
