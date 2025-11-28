@@ -4,61 +4,61 @@ regime: ndl_ir                             # default to neurogenesis + IR; overr
 # Per paper protocol: pretrain on digits (0-9), then introduce uppercase (10-35) and lowercase (36-61).
 # base_classes: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 # base_classes: [1,7]                        # seed classes trained before neurogenesis
-incremental_classes: [0, 2, 3, 4, 5, 6, 8, 9]  # stream of classes introduced later
+# incremental_classes: [0, 2, 3, 4, 5, 6, 8, 9]  # stream of classes introduced later
 base_classes: [1,2,3,4,5,6,7,8,9,0]  # shuffled order to avoid any ordering effects
-# incremental_classes:
-#   - 10
-#   - 11
-#   - 12
-#   - 13
-#   - 14
-#   - 15
-#   - 16
-#   - 17
-#   - 18
-#   - 19
-#   - 20
-#   - 21
-#   - 22
-#   - 23
-#   - 24
-#   - 25
-#   - 26
-#   - 27
-#   - 28
-#   - 29
-#   - 30
-#   - 31
-#   - 32
-#   - 33
-#   - 34
-#   - 35
-#   - 36
-#   - 37
-#   - 38
-#   - 39
-#   - 40
-#   - 41
-#   - 42
-#   - 43
-#   - 44
-#   - 45
-#   - 46
-#   - 47
-#   - 48
-#   - 49
-#   - 50
-#   - 51
-#   - 52
-#   - 53
-#   - 54
-#   - 55
-#   - 56
-#   - 57
-#   - 58
-#   - 59
-#   - 60
-#   - 61
+incremental_classes:
+  - 10
+  - 11
+  - 12
+  - 13
+  - 14
+  - 15
+  - 16
+  - 17
+  - 18
+  - 19
+  - 20
+  - 21
+  - 22
+  - 23
+  - 24
+  - 25
+  - 26
+  - 27
+  - 28
+  - 29
+  - 30
+  - 31
+  - 32
+  - 33
+  - 34
+  - 35
+  - 36
+  - 37
+  - 38
+  - 39
+  - 40
+  - 41
+  - 42
+  - 43
+  - 44
+  - 45
+  - 46
+  - 47
+  - 48
+  - 49
+  - 50
+  - 51
+  - 52
+  - 53
+  - 54
+  - 55
+  - 56
+  - 57
+  - 58
+  - 59
+  - 60
+  - 61
 
 threshold:
   percentile: 0.95                          # percentile cut-off for novelty detection

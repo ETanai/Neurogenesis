@@ -8,7 +8,7 @@ import math
 import tempfile
 import time
 from pathlib import Path
-from typing import Dict, List, Sequence
+from typing import Dict, Iterable, List, Sequence
 
 import hydra
 import torch
@@ -147,6 +147,147 @@ class _NullLogger:
     def finish(self) -> None:  # noqa: D401
         return None
 
+
+class _TrainingDataReplay:
+    """
+    Simple replay buffer that stores flattened real samples per class and
+    returns them on demand instead of generating intrinsic samples.
+    """
+
+    def __init__(
+        self,
+        *,
+        input_dim: int,
+        max_per_class: int | None = None,
+        storage_device: torch.device | str = "cpu",
+    ) -> None:
+        self.input_dim = int(input_dim)
+        self.max_per_class = None if max_per_class is None else int(max_per_class)
+        self.device = torch.device(storage_device)
+        self.stats: Dict[int, Dict[str, torch.Tensor]] = {}
+        self._class_weights: Dict[int, float] = {}
+
+    def reset(self) -> None:
+        self.stats.clear()
+        self._class_weights = {}
+
+    def _normalize_samples(self, samples: torch.Tensor) -> torch.Tensor:
+        flat = samples.view(samples.size(0), -1)
+        if flat.size(1) != self.input_dim:
+            raise ValueError(
+                f"Replay sample dimensionality mismatch: expected {self.input_dim}, got {flat.size(1)}"
+            )
+        return flat.to(self.device)
+
+    @torch.no_grad()
+    def fit(
+        self,
+        dataloader: DataLoader,
+        *,
+        class_filter: Iterable[int] | None = None,
+    ) -> None:
+        filtered = set(int(c) for c in class_filter) if class_filter is not None else None
+        bucket: Dict[int, list[torch.Tensor]] = {}
+        quota = {cls: self.max_per_class for cls in (filtered or [])}
+
+        for images, labels in dataloader:
+            if filtered is not None:
+                mask = [int(lbl) in filtered for lbl in labels.tolist()]
+                if not any(mask):
+                    continue
+            flat = self._normalize_samples(images)
+            for sample, cls in zip(flat, labels.tolist()):
+                cls = int(cls)
+                if filtered is not None and cls not in filtered:
+                    continue
+                if self.max_per_class is not None:
+                    remaining = quota.get(cls, self.max_per_class)
+                    if remaining is not None and remaining <= 0:
+                        continue
+                    quota[cls] = remaining - 1 if remaining is not None else None
+                bucket.setdefault(cls, []).append(sample.detach().cpu())
+
+        for cls, samples in bucket.items():
+            if not samples:
+                continue
+            stacked = torch.stack(samples, dim=0)
+            if self.max_per_class is not None and stacked.size(0) > self.max_per_class:
+                perm = torch.randperm(stacked.size(0))[: self.max_per_class]
+                stacked = stacked[perm]
+            self.stats[cls] = {
+                "samples": stacked.to(self.device),
+                "count": int(stacked.size(0)),
+            }
+
+        if bucket:
+            self._refresh_default_weights()
+
+    def available_classes(self) -> list[int]:
+        return sorted(self.stats.keys())
+
+    def _refresh_default_weights(self) -> None:
+        if not self.stats:
+            self._class_weights = {}
+            return
+        uniform = 1.0 / len(self.stats)
+        self._class_weights = {cls: uniform for cls in self.stats}
+
+    def set_class_weights(self, weights: Dict[int, float]) -> None:
+        if not weights:
+            self._class_weights = {}
+            return
+        total = float(sum(weights.values()))
+        if total <= 0:
+            raise ValueError("Class weights must sum to a positive value")
+        self._class_weights = {int(k): float(v) for k, v in weights.items()}
+
+    def get_class_weights(self) -> Dict[int, float]:
+        return {int(k): float(v) for k, v in self._class_weights.items()}
+
+    def describe(self) -> Dict[int, Dict[str, float]]:
+        return {
+            int(cls): {"count": float(stats.get("count", 0))}
+            for cls, stats in self.stats.items()
+        }
+
+    def _sample_from_class(self, cls: int, n: int) -> torch.Tensor:
+        if cls not in self.stats:
+            raise KeyError(f"No dataset replay samples stored for class {cls}")
+        samples = self.stats[cls]["samples"]
+        if samples.numel() == 0:
+            raise RuntimeError(f"Replay buffer for class {cls} is empty")
+        idx = torch.randint(0, samples.size(0), (n,), device=samples.device)
+        return samples.index_select(0, idx).to(self.device)
+
+    @torch.no_grad()
+    def sample_images(
+        self,
+        cls: int | None,
+        n: int,
+        *,
+        class_weights: Dict[int, float] | None = None,
+    ) -> torch.Tensor:
+        if not self.stats:
+            raise RuntimeError("Dataset replay buffer is empty; call fit() first.")
+        if cls is None:
+            weights = class_weights or self._class_weights
+            if not weights:
+                raise RuntimeError("Class weights undefined for dataset replay sampling.")
+            classes = list(weights.keys())
+            probs = torch.tensor(
+                [weights[c] for c in classes],
+                dtype=torch.float32,
+                device=self.device,
+            )
+            probs = probs / probs.sum()
+            draws = torch.multinomial(probs, num_samples=n, replacement=True)
+            parts: list[torch.Tensor] = []
+            for cls_idx, count in zip(*torch.unique(draws, return_counts=True)):
+                parts.append(
+                    self._sample_from_class(int(classes[int(cls_idx)]), int(count))
+                )
+            return torch.cat(parts, dim=0)
+        return self._sample_from_class(int(cls), int(n))
 
 def _apply_experiment_model_overrides(cfg: DictConfig) -> None:
     exp_model = cfg.experiment.get("model") if hasattr(cfg.experiment, "get") else None
@@ -422,11 +563,15 @@ def _log_replay_stats(replay: IntrinsicReplay | None, logger, step: int) -> None
         return
     summary = replay.describe()
     for cls, stats in summary.items():
-        payload = {
-            f"replay/class_{cls}_count": stats["count"],
-            f"replay/class_{cls}_latent_var_mean": stats["latent_var_mean"],
-            f"replay/class_{cls}_cov_condition": stats["cov_condition"],
-        }
+        payload = {}
+        if "count" in stats:
+            payload[f"replay/class_{cls}_count"] = stats["count"]
+        if "latent_var_mean" in stats:
+            payload[f"replay/class_{cls}_latent_var_mean"] = stats["latent_var_mean"]
+        if "cov_condition" in stats:
+            payload[f"replay/class_{cls}_cov_condition"] = stats["cov_condition"]
+        if not payload:
+            continue
         logger.log_metrics(payload, step=step)
     weights = replay.get_class_weights()
     if weights:
@@ -531,7 +676,7 @@ def _get_class_dataset(dm, class_id: int, split: str = "train"):
 
 
 def _bootstrap_replay(
-    replay: IntrinsicReplay,
+    replay,
     dm: MNISTDataModule,
     classes: Sequence[int],
     *,
@@ -540,8 +685,14 @@ def _bootstrap_replay(
     reset_stats: bool = False,
 ) -> None:
     if reset_stats:
-        replay.stats.clear()
-        replay.set_class_weights({})
+        reset_fn = getattr(replay, "reset", None)
+        if callable(reset_fn):
+            reset_fn()
+        else:
+            if hasattr(replay, "stats"):
+                replay.stats.clear()
+            if hasattr(replay, "set_class_weights"):
+                replay.set_class_weights({})
 
     t_total = time.perf_counter()
     for cls in classes:
@@ -552,7 +703,7 @@ def _bootstrap_replay(
             desc=f"Bootstrapping replay for class {cls}",
             leave=True,
         )
-        replay.fit(loader)
+        replay.fit(loader, class_filter=(cls,))
         try:
             # best-effort logging if replay has a logger via outer scope
             pass
@@ -690,9 +841,11 @@ def run(cfg: DictConfig) -> None:
         logger.log_params(
             {
                 "dataset": cfg.experiment.dataset,
+                "regime": cfg.experiment.regime,
                 "base_classes": list(cfg.experiment.base_classes),
                 "incremental_classes": list(cfg.experiment.incremental_classes),
                 "hidden_sizes": list(cfg.model.hidden_sizes),
+                "paper_experiment": getattr(cfg, "paper_experiment", ""),
             }
         )
         _log_config_snapshot(cfg, logger)
@@ -709,7 +862,12 @@ def run(cfg: DictConfig) -> None:
     training_stats["pretrain_parameter_updates"] = getattr(pretrainer, "update_steps", 0)
     model.reset_update_counter()
 
-    use_neurogenesis, use_replay = _resolve_regime(cfg)
+    replay_mode = str(cfg.replay.get("mode", "intrinsic")).lower()
+    use_neurogenesis, regime_replay = _resolve_regime(cfg)
+    replay_enabled = bool(cfg.replay.get("enabled", True))
+    use_replay = (regime_replay and replay_enabled) or (
+        replay_mode == "dataset" and replay_enabled
+    )
 
     thresholds: List[float] = []
     if use_neurogenesis:
@@ -729,9 +887,20 @@ def run(cfg: DictConfig) -> None:
 
     replay = None
     if use_replay:
-        replay = IntrinsicReplay(
-            model.encoder, model.decoder, eps=cfg.replay.cov_eps, device=device
-        )
+        if replay_mode == "dataset":
+            replay = _TrainingDataReplay(
+                input_dim=cfg.model.input_dim,
+                max_per_class=cfg.replay.get("dataset_max_samples_per_class", None),
+                storage_device=cfg.replay.get("dataset_storage_device", "cpu"),
+            )
+        elif replay_mode == "intrinsic":
+            replay = IntrinsicReplay(
+                model.encoder, model.decoder, eps=cfg.replay.cov_eps, device=device
+            )
+        else:
+            raise ValueError(
+                f"Unknown replay.mode '{cfg.replay.get('mode')}'. Expected 'intrinsic' or 'dataset'."
+            )
         t_boot0 = time.perf_counter()
         _bootstrap_replay(
             replay,

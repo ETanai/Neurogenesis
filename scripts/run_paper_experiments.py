@@ -3,12 +3,18 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
 from hydra import compose, initialize
+from omegaconf import open_dict
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.run_experiments import run as run_single
 
@@ -19,6 +25,8 @@ class PaperExperiment:
     description: str
     overrides: tuple[str, ...]
 
+
+MLFLOW_EXPERIMENT_NAME = "neurogenesis-paper"
 
 PAPER_EXPERIMENTS: tuple[PaperExperiment, ...] = (
     PaperExperiment(
@@ -68,17 +76,19 @@ PAPER_EXPERIMENTS: tuple[PaperExperiment, ...] = (
             "data=sd19",
             "experiment=sd19_incremental",
             "experiment.regime=ndl",
-            "replay.enabled=false",
+            "replay.enabled=true",
+            "replay.mode=dataset",
         ),
     ),
     PaperExperiment(
         name="sd19_ndl_ir",
-        description="SD-19 neurogenesis with intrinsic replay enabled for comparison.",
+        description="SD-19 neurogenesis with dataset-based replay enabled for comparison.",
         overrides=(
             "data=sd19",
             "experiment=sd19_incremental",
             "experiment.regime=ndl_ir",
             "replay.enabled=true",
+            "replay.mode=dataset",
         ),
     ),
 )
@@ -109,9 +119,14 @@ def run_suite(output_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     os.chdir(repo_root)
     results: list[dict] = []
-    with initialize(version_base=None, config_path="config"):
+    with initialize(version_base=None, config_path="../config"):
         for spec in PAPER_EXPERIMENTS:
             cfg = compose(config_name="train", overrides=list(spec.overrides))
+            with open_dict(cfg):
+                cfg.paper_experiment = spec.name
+                if "logging" in cfg and "mlflow" in cfg.logging:
+                    cfg.logging.mlflow.experiment_name = MLFLOW_EXPERIMENT_NAME
+                    cfg.logging.mlflow.run_name = spec.name
             start = time.perf_counter()
             artifacts = run_single(cfg)
             runtime = time.perf_counter() - start
