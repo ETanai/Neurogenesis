@@ -61,7 +61,7 @@ incremental_classes:
   - 61
 
 threshold:
-  percentile: 0.95                          # percentile cut-off for novelty detection
+  percentile: 0.99                          # percentile cut-off for novelty detection
   margin: 0.0                               # additive margin for the percentile threshold
   minimum: 1.0e-04                          # never allow thresholds below this value
 

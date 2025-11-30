@@ -1,0 +1,39 @@
+description: "MNIST incremental ablations for Figure 4."
+repetitions: 20
+seed:
+  base: 42
+  strategy: sequential
+
+mlflow:
+  experiment_name: neurogenesis-paper-figure4
+  run_name_prefix: figure4
+
+runs:
+  - name: cl
+    description: "Conventional learning (no neurogenesis, no replay)."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - experiment.regime=cl
+      - replay.enabled=false
+  - name: ndl
+    description: "Neurogenesis without intrinsic replay."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - experiment.regime=ndl
+      - replay.enabled=false
+  - name: cl_ir
+    description: "Conventional learning with intrinsic replay."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - experiment.regime=cl_ir
+      - replay.enabled=true
+  - name: ndl_ir
+    description: "Neurogenesis with intrinsic replay."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - experiment.regime=ndl_ir
+      - replay.enabled=true

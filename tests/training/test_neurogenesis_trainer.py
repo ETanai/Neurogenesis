@@ -145,5 +145,27 @@ def test_get_recon_errors_simple(dummy_loader):
     assert torch.allclose(errs, torch.tensor([0.2, 0.2, 0.2, 0.2]))
 
 
+def test_threshold_goal_config_injection():
+    ae = DummyAE(hidden_sizes=[2, 2])
+    trainer = NeurogenesisTrainer(
+        ae,
+        ir=None,
+        thresholds=[0.25, 0.5],
+        max_nodes=[1, 1],
+        max_outliers=0.1,
+        early_stop_cfg={
+            "min_delta": 1e-4,
+            "patience": 2,
+            "mode": "min",
+            "use_threshold_goal": True,
+            "threshold_goal_factor": 1.2,
+        },
+    )
+    cfg = trainer._build_phase_early_stop_cfg(0)
+    assert cfg["goal"] == pytest.approx(0.25 * 1.2)
+    assert "use_threshold_goal" not in cfg
+    assert "threshold_goal_factor" not in cfg
+
+
 if __name__ == "__main__":
     pytest.main()

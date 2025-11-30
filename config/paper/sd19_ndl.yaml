@@ -1,0 +1,19 @@
+description: "SD-19 neurogenesis with dataset replay (no intrinsic replay)."
+repetitions: 1
+seed:
+  base: 42
+  strategy: sequential
+
+mlflow:
+  experiment_name: neurogenesis-paper-sd19-ndl
+  run_name_prefix: sd19_ndl
+
+runs:
+  - name: ndl
+    description: "SD-19 neurogenesis using dataset replay buffer."
+    overrides:
+      - data=sd19
+      - experiment=sd19_incremental
+      - experiment.regime=ndl
+      - replay.enabled=true
+      - replay.mode=dataset

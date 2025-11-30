@@ -2,7 +2,7 @@ import pytest
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from models.ng_autoencoder import NGAutoEncoder
+from models.ng_autoencoder import EarlyStopper, NGAutoEncoder
 from training.neurogenesis_trainer import NeurogenesisTrainer
 
 # Reproducibility
@@ -138,6 +138,13 @@ def test_reconstruction_error_positive(toy_input):
     x_hat = toy_input + 1.0
     err = NGAutoEncoder.reconstruction_error(x_hat, x)
     assert torch.all(err > 0)
+
+
+def test_early_stopper_goal_triggers():
+    stopper = EarlyStopper(min_delta=0.5, patience=3, mode="min", goal=0.2)
+    assert not stopper.step(0.8)
+    assert stopper.step(0.2)
+    assert stopper.should_stop
 
 
 def test_set_requires_grad_freeze_old(simple_ae):

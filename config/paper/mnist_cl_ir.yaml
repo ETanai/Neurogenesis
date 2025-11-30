@@ -1,0 +1,18 @@
+description: "MNIST baseline: classical learning with intrinsic replay."
+repetitions: 1
+seed:
+  base: 42
+  strategy: sequential
+
+mlflow:
+  experiment_name: neurogenesis-paper-mnist-cl-ir
+  run_name_prefix: mnist_cl_ir
+
+runs:
+  - name: cl_ir
+    description: "Classical learning augmented with intrinsic replay."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - experiment.regime=cl_ir
+      - replay.enabled=true

@@ -33,7 +33,13 @@ EpochSummary = Dict[str, Union[int, float, str]]
 
 
 class EarlyStopper:
-    def __init__(self, min_delta: float = 0.0, patience: int = 1, mode: str = "min"):
+    def __init__(
+        self,
+        min_delta: float = 0.0,
+        patience: int = 1,
+        mode: str = "min",
+        goal: Optional[float] = None,
+    ):
         assert mode in {"min", "max"}
         self.min_delta = min_delta
         self.patience = patience
@@ -41,8 +47,16 @@ class EarlyStopper:
         self.best = float("inf") if mode == "min" else -float("inf")
         self.bad_epochs = 0
         self.should_stop = False
+        self.goal = goal
 
     def step(self, current: float):
+        if self.goal is not None:
+            goal_reached = (
+                current <= self.goal if self.mode == "min" else current >= self.goal
+            )
+            if goal_reached:
+                self.should_stop = True
+                return True
         improved = (
             (current < self.best - self.min_delta)
             if self.mode == "min"

@@ -1,0 +1,18 @@
+description: "MNIST neurogenesis with intrinsic replay (main paper result)."
+repetitions: 1
+seed:
+  base: 42
+  strategy: sequential
+
+mlflow:
+  experiment_name: neurogenesis-paper-mnist-ndl-ir
+  run_name_prefix: mnist_ndl_ir
+
+runs:
+  - name: ndl_ir
+    description: "Neurogenesis plus intrinsic replay."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - experiment.regime=ndl_ir
+      - replay.enabled=true

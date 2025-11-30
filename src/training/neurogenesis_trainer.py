@@ -1,5 +1,5 @@
 import math
-from typing import Any, List
+from typing import Any, List, Optional
 
 import torch
 from pytorch_lightning.loggers import MLFlowLogger
@@ -56,6 +56,19 @@ class NeurogenesisTrainer:
 
         # History: class_id -> {'layer_errors': List[List[Tensor]]}
         self.history: dict[Any, dict[str, List[List[Tensor]]]] = {}
+
+    def _build_phase_early_stop_cfg(self, level: Optional[int] = None) -> Optional[dict]:
+        """Return a per-phase early-stop config with optional threshold goal."""
+        if not self.early_stop_cfg:
+            return None
+        cfg = dict(self.early_stop_cfg)
+        use_goal = cfg.pop("use_threshold_goal", False)
+        factor = cfg.pop("threshold_goal_factor", 1.0)
+        if use_goal and self.thresholds:
+            idx = len(self.thresholds) - 1 if level is None else max(level, 0)
+            idx = min(idx, len(self.thresholds) - 1)
+            cfg["goal"] = self.thresholds[idx] * factor
+        return cfg
 
     def _model_device(self) -> torch.device:
         params = getattr(self.ae, "parameters", None)
@@ -258,13 +271,14 @@ class NeurogenesisTrainer:
                 last_loss = 1
                 round_idx = added + 1
                 epoch_logger = self._build_epoch_logger(class_id, level, round_idx)
+                phase_es_cfg = self._build_phase_early_stop_cfg(level)
 
                 hist = self.ae.plasticity_phase(
                     loader=outliers_loader,
                     level=level,
                     epochs=self.plasticity_epochs,
                     lr=self.base_lr,
-                    early_stop_cfg=self.early_stop_cfg,
+                    early_stop_cfg=phase_es_cfg,
                     forward_fn=lambda x: self.ae.forward_partial(x, level),
                     epoch_logger=epoch_logger,
                 )
@@ -291,13 +305,14 @@ class NeurogenesisTrainer:
                 last_loss = mean_loss
 
                 last_loss = 1
+                stability_level = int(len(self.ae.encoder) / 2) - 1
                 hist = self.ae.stability_phase(
                     loader=outliers_loader,
-                    level=int(len(self.ae.encoder) / 2) - 1,
+                    level=stability_level,
                     lr=self.base_lr,
                     epochs=self.stability_epochs,
                     old_x=old_x,
-                    early_stop_cfg=self.early_stop_cfg,
+                    early_stop_cfg=phase_es_cfg,
                     epoch_logger=epoch_logger,
                 )
 
@@ -355,7 +370,7 @@ class NeurogenesisTrainer:
                     level + 1,
                     epochs=self.next_layer_epochs,
                     lr=self.base_lr / 100,
-                    early_stop_cfg=self.early_stop_cfg,
+                    early_stop_cfg=self._build_phase_early_stop_cfg(level + 1),
                 )
                 self.ae.stability_phase(
                     loader,
@@ -363,7 +378,7 @@ class NeurogenesisTrainer:
                     lr=self.base_lr / 100,
                     epochs=self.stability_epochs,
                     old_x=old_x,
-                    early_stop_cfg=self.early_stop_cfg,
+                    early_stop_cfg=self._build_phase_early_stop_cfg(level + 1),
                 )
 
             if self.logger:
