@@ -1,5 +1,5 @@
 description: "MNIST incremental ablations for Figure 4."
-repetitions: 20
+repetitions: 5
 seed:
   base: 42
   strategy: sequential

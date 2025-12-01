@@ -2,6 +2,7 @@ import io
 from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import torch
 
 from models.ng_autoencoder import NGAutoEncoder
@@ -249,28 +250,38 @@ def plot_partial_recon_grid_mlflow(
     for i, k in enumerate(levels, start=1):
         axes[i, 0].set_ylabel(f"Level {k + 1}", rotation=0, labelpad=30, va="center")
 
-    # optional column group headers (spanning subsets of columns)
+    # optional column group headers (spanning subsets of columns) and separators
     if col_group_titles and col_group_splits:
         assert len(col_group_titles) == len(col_group_splits), (
             "col_group_titles and col_group_splits must have same length"
         )
         # normalize splits to number of columns
-        splits = [min(s, ncols) for s in col_group_splits]
+        splits = [min(max(s, 0), ncols) for s in col_group_splits]
         start = 0
         for title, end in zip(col_group_titles, splits):
             if end <= start:
                 continue
-            # compute center x of the span in figure coords
             span_cols = end - start
             center_col = start + span_cols / 2.0 - 0.5
-            # get axis for top row, convert data coords to figure fraction
-            ax0 = axes[0, max(start, 0)]
-            bbox = ax0.get_window_extent(fig.canvas.get_renderer())
-            # position in axes fraction for a simple approach
-            # place text above the top row by using figure text with relative x
             x_frac = (center_col + 0.5) / ncols
             fig.text(x_frac, 0.99, title, ha="center", va="top")
             start = end
+
+        # draw separators between column groups for clarity
+        for boundary in splits[:-1]:
+            if boundary <= 0 or boundary >= ncols:
+                continue
+            x_frac = boundary / ncols
+            line = Line2D(
+                [x_frac, x_frac],
+                [0.02, 0.98],
+                transform=fig.transFigure,
+                color="tab:red",
+                linewidth=2.0,
+                linestyle="--",
+                alpha=0.85,
+            )
+            fig.add_artist(line)
 
     # overall left margin so row labels aren't cut off
     fig.subplots_adjust(left=0.08)

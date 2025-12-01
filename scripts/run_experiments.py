@@ -8,7 +8,7 @@ import math
 import tempfile
 import time
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence
 
 import hydra
 import torch
@@ -472,51 +472,110 @@ def _log_eval_records(records: list[dict], logger) -> None:
 def _maybe_make_visual_batch(
     dm, classes: Sequence[int], device: torch.device, *, split: str = "val"
 ):
+    samples_per_class = max(1, min(4, 16 // max(1, len(classes))))
     if hasattr(dm, "make_class_balanced_batch"):
         try:
             batch = dm.make_class_balanced_batch(
                 classes,
-                samples_per_class=min(4, max(1, 16 // max(1, len(classes)))),
+                samples_per_class=samples_per_class,
                 split=split,
                 device=device,
                 shuffle=False,
                 return_labels=True,
             )
-            if isinstance(batch, tuple) and len(batch) >= 2:
-                return batch
+            if isinstance(batch, tuple):
+                if len(batch) == 3:
+                    return batch
+                if len(batch) == 2:
+                    imgs, labels = batch
+                    return imgs, labels, []
         except Exception:
             pass
 
-    subset = _get_combined_dataset(dm, classes, split=split)
-    loader = _dataloader(
-        subset,
-        batch_size=min(16, len(subset) if hasattr(subset, "__len__") else 16),
-        num_workers=0,
-        shuffle=False,
-    )
-    try:
-        batch = next(iter(loader))
-    except StopIteration:
+    tensors: list[torch.Tensor] = []
+    labels: list[torch.Tensor] = []
+    splits: list[int] = []
+    total = 0
+
+    for cls in classes:
+        try:
+            subset = _get_class_dataset(dm, cls, split=split)
+        except Exception:
+            subset = None
+        if subset is None:
+            continue
+        loader = _dataloader(
+            subset,
+            batch_size=min(samples_per_class, len(subset) if hasattr(subset, "__len__") else samples_per_class),
+            num_workers=0,
+            shuffle=False,
+        )
+        try:
+            batch = next(iter(loader))
+        except StopIteration:
+            continue
+        images = batch[0][:samples_per_class]
+        tensors.append(images)
+        labels.append(torch.full((images.size(0),), int(cls), dtype=torch.long))
+        total += images.size(0)
+        splits.append(total)
+
+    if not tensors:
         return None
-    images, labels = batch
-    return images.to(device), labels.to(device), []
+
+    stacked = torch.cat(tensors, dim=0).to(device)
+    label_tensor = torch.cat(labels, dim=0).to(device)
+    return stacked, label_tensor, splits
 
 
 def _log_reconstruction_artifacts(
-    model, dm, classes: Sequence[int], device: torch.device, logger, step: int
+    model,
+    dm,
+    classes: Sequence[int],
+    learned_count: int,
+    device: torch.device,
+    logger,
+    step: int,
 ) -> None:
     if isinstance(logger, _NullLogger) or plot_recon_grid_mlflow is None:
         return
     sample = _maybe_make_visual_batch(dm, classes, device)
     if sample is None:
         return
-    images, labels, splits = sample
+    images, _, splits = sample
     view_shape = images.shape[1:]
+    total_cols = images.shape[0]
+    if total_cols == 0:
+        return
+
+    def _boundary_from_splits() -> int:
+        if learned_count <= 0:
+            return 0
+        capped_classes = min(learned_count, len(classes))
+        if splits:
+            idx = min(capped_classes, len(splits))
+            return min(total_cols, splits[idx - 1])
+        frac = capped_classes / max(1, len(classes))
+        return min(total_cols, max(0, int(round(total_cols * frac))))
+
+    boundary = _boundary_from_splits()
+    group_titles: Optional[list[str]] = None
+    group_splits: Optional[list[int]] = None
+    if 0 < boundary < total_cols:
+        group_titles = ["Learned", "Unlearned"]
+        group_splits = [boundary, total_cols]
+
+    ncols = total_cols
+    recon_figsize = (max(6.0, ncols * 0.6), max(4.0, 6.0))
+
+    cpu_images = images.detach().cpu()
 
     fig, png_bytes = plot_recon_grid_mlflow(
         model,
-        images.detach().cpu(),
+        cpu_images,
         view_shape=view_shape,
+        ncols=ncols,
+        figsize=recon_figsize,
         return_mlflow_artifact=True,
         artifact_name="reconstructions.png",
     )
@@ -532,22 +591,27 @@ def _log_reconstruction_artifacts(
     if plot_partial_recon_grid_mlflow is not None:
         try:
             levels = list(range(len(model.hidden_sizes)))
-            col_titles = None
-            col_splits = None
-            if splits:
-                col_titles = [str(int(c)) for c in classes]
-                col_splits = splits
+            partial_figsize = (
+                max(10.0, ncols * 0.5),
+                max(6.0, (len(levels) + 1) * 1.5),
+            )
+            col_titles = group_titles
+            col_splits = group_splits
             fig_partial, png_partial = plot_partial_recon_grid_mlflow(
                 model,
-                images.detach().cpu(),
+                cpu_images,
                 view_shape=view_shape,
                 levels=levels,
+                ncols=ncols,
+                figsize=partial_figsize,
                 col_group_titles=col_titles,
                 col_group_splits=col_splits,
                 return_mlflow_artifact=True,
             )
             logger.log_image(png_partial, f"figures/partial_reconstructions_step_{step}.png")
-            logger.log_figure(fig_partial, f"figures/partial_reconstructions_step_{step}.mpl.png")
+            logger.log_figure(
+                fig_partial, f"figures/partial_reconstructions_step_{step}.mpl.png"
+            )
             try:
                 import matplotlib.pyplot as plt
 
@@ -945,10 +1009,15 @@ def run(cfg: DictConfig) -> None:
         )
 
     learned: list[int] = list(cfg.experiment.base_classes)
+    all_classes: list[int] = list(cfg.experiment.base_classes) + list(
+        cfg.experiment.incremental_classes
+    )
     trainer.log_global_sizes()
     eval_records: list[dict] = []
     eval_records.extend(_evaluate(trainer, dm, learned, cfg, step=len(learned), logger=logger))
-    _log_reconstruction_artifacts(model, dm, learned, device, logger, step=len(learned))
+    _log_reconstruction_artifacts(
+        model, dm, all_classes, len(learned), device, logger, step=len(learned)
+    )
 
     for stage, class_id in enumerate(cfg.experiment.incremental_classes, start=1):
         subset = _get_class_dataset(dm, class_id, split="train")
@@ -959,27 +1028,29 @@ def run(cfg: DictConfig) -> None:
             {"timing/learn_class_sec": time.perf_counter() - t_learn0}, step=len(learned) + 1
         )
         # recompute replay stats for all learned classes with the updated encoder
-        all_classes = learned + [class_id]
+        learned_so_far = learned + [class_id]
         trainer.log_global_sizes()
         if replay is not None:
             t_boot_inc0 = time.perf_counter()
             _bootstrap_replay(
                 replay,
                 dm,
-                all_classes,
+                learned_so_far,
                 batch_size=min(cfg.replay.stats_batch_size, cfg.data.batch_size),
                 num_workers=cfg.data.num_workers,
                 reset_stats=True,
             )
             logger.log_metrics(
                 {"timing/replay_update_sec": time.perf_counter() - t_boot_inc0},
-                step=len(all_classes),
+                step=len(learned_so_far),
             )
         learned.append(class_id)
         _log_replay_stats(replay, logger, step=len(learned))
         eval_records.extend(_evaluate(trainer, dm, learned, cfg, step=len(learned), logger=logger))
         t_fig0 = time.perf_counter()
-        _log_reconstruction_artifacts(model, dm, learned, device, logger, step=len(learned))
+        _log_reconstruction_artifacts(
+            model, dm, all_classes, len(learned), device, logger, step=len(learned)
+        )
         logger.log_metrics(
             {"timing/recon_artifacts_sec": time.perf_counter() - t_fig0}, step=len(learned)
         )
