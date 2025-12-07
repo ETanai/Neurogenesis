@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Dict, Iterable, Optional
 
 import torch
@@ -38,6 +39,44 @@ class IntrinsicReplay:
         # Will hold per-class: {"class_id": {"mean": (d,), "L": (d,d)}}
         self.stats: Dict[int, Dict[str, torch.Tensor]] = {}
         self._class_weights: Dict[int, float] = {}
+        self.latent_dim = self._infer_encoder_latent_dim()
+
+    def _infer_encoder_latent_dim(self) -> int:
+        modules = list(self.encoder)
+        for module in reversed(modules):
+            out_features = getattr(module, "out_features", None)
+            if out_features is not None:
+                return int(out_features)
+        raise RuntimeError("Could not infer encoder latent dimensionality.")
+
+    def sync_encoder_latent_dim(self) -> None:
+        target_dim = self._infer_encoder_latent_dim()
+        if target_dim > self.latent_dim:
+            self._expand_stats(target_dim)
+        else:
+            self.latent_dim = target_dim
+
+    def _expand_stats(self, target_dim: int) -> None:
+        current = self.latent_dim
+        if target_dim <= current:
+            self.latent_dim = target_dim
+            return
+        delta = target_dim - current
+        if not self.stats:
+            self.latent_dim = target_dim
+            return
+        jitter = math.sqrt(max(self.eps, 1e-12))
+        for cls, stats in self.stats.items():
+            mean = stats["mean"]
+            pad = torch.zeros(delta, device=mean.device, dtype=mean.dtype)
+            stats["mean"] = torch.cat([mean, pad], dim=0)
+
+            L = stats["L"]
+            new_L = L.new_zeros(target_dim, target_dim)
+            new_L[:current, :current] = L
+            new_L[current:, current:] = torch.eye(delta, device=L.device, dtype=L.dtype) * jitter
+            stats["L"] = new_L
+        self.latent_dim = target_dim
 
     def _safe_cholesky(self, cov: torch.Tensor) -> torch.Tensor:
         """
@@ -68,6 +107,7 @@ class IntrinsicReplay:
         to compute mean and covariance.
         Expects dataloader to yield (imgs, labels).
         """
+        self.sync_encoder_latent_dim()
         accum: Dict[int, list[torch.Tensor]] = {}
 
         for imgs, labels in dataloader:

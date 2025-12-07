@@ -57,6 +57,26 @@ class NeurogenesisTrainer:
         # History: class_id -> {'layer_errors': List[List[Tensor]]}
         self.history: dict[Any, dict[str, List[List[Tensor]]]] = {}
 
+    def _log_outlier_metrics(
+        self,
+        *,
+        class_id: Any,
+        level: int,
+        iteration: int,
+        n_outliers: int,
+        total_seen: int,
+    ) -> None:
+        if not self.logger:
+            return
+        fraction = n_outliers / max(total_seen, 1)
+        self.logger.log_metrics(
+            {
+                f"class_{class_id}_level_{level}_iter_{iteration}_n_outliers": n_outliers,
+                f"class_{class_id}_level_{level}_iter_{iteration}_outlier_fraction": fraction,
+            },
+            step=iteration,
+        )
+
     def _build_phase_early_stop_cfg(self, level: Optional[int] = None) -> Optional[dict]:
         """Return a per-phase early-stop config with optional threshold goal."""
         if not self.early_stop_cfg:
@@ -201,6 +221,7 @@ class NeurogenesisTrainer:
         num_layers = len(self.ae.hidden_sizes)
         sizes_before = list(self.ae.hidden_sizes)
         self.history[class_id] = {"layer_errors": [[] for _ in range(num_layers)]}
+        outlier_history: dict[int, list[dict]] = {lvl: [] for lvl in range(num_layers)}
 
         # ---- log "class learned" ----
         self._class_count += 1
@@ -220,14 +241,22 @@ class NeurogenesisTrainer:
             n_plastic_neurons = 0
             n_outliers, outliers_loader, total_seen = self._get_outliers(loader, level)
             fraction = n_outliers / max(total_seen, 1)
-            if self.logger:
-                self.logger.log_metrics(
-                    {
-                        f"class_{class_id}_level_{level}_n_outliers": n_outliers,
-                        f"class_{class_id}_level_{level}_outlier_fraction": fraction,
-                    },
-                    step=added,
-                )
+            iteration_idx = 0
+            self._log_outlier_metrics(
+                class_id=class_id,
+                level=level,
+                iteration=iteration_idx,
+                n_outliers=n_outliers,
+                total_seen=total_seen,
+            )
+            outlier_history[level].append(
+                {
+                    "iteration": iteration_idx,
+                    "n_outliers": n_outliers,
+                    "total_seen": total_seen,
+                    "fraction": fraction,
+                }
+            )
 
             if self.logger:
                 self.logger.log_metrics(
@@ -263,6 +292,7 @@ class NeurogenesisTrainer:
                         for lvl, sz in enumerate(self.ae.hidden_sizes)
                     }
                     self.logger.log_metrics(current_sizes, step=added)
+                if self.logger:
                     self.logger.log_metrics(
                         {f"class_{class_id}/growth_level_{level}": self.ae.hidden_sizes[level]},
                         step=added,
@@ -351,7 +381,23 @@ class NeurogenesisTrainer:
 
                 added += 1
                 n_outliers, outliers_loader, total_seen = self._get_outliers(loader, level)
+                iteration_idx += 1
+                self._log_outlier_metrics(
+                    class_id=class_id,
+                    level=level,
+                    iteration=iteration_idx,
+                    n_outliers=n_outliers,
+                    total_seen=total_seen,
+                )
                 fraction = n_outliers / max(total_seen, 1)
+                outlier_history[level].append(
+                    {
+                        "iteration": iteration_idx,
+                        "n_outliers": n_outliers,
+                        "total_seen": total_seen,
+                        "fraction": fraction,
+                    }
+                )
                 if self.logger:
                     self.logger.log_metrics(
                         {
@@ -390,6 +436,26 @@ class NeurogenesisTrainer:
             pbar_levels.update(1)
         pbar_levels.close()
         # Fit IR stats for the incoming class
+
+        if self.logger and outlier_history:
+            lines = [f"Outlier progression for class {class_id}"]
+            for level_idx in range(num_layers):
+                entries = outlier_history.get(level_idx) or []
+                if not entries:
+                    continue
+                lines.append(f"Level {level_idx}:")
+                for entry in entries:
+                    iteration = entry["iteration"]
+                    n_out = entry["n_outliers"]
+                    total = entry["total_seen"]
+                    frac = entry["fraction"]
+                    lines.append(
+                        f"  iter {iteration:02d}: {n_out} / {total} ({frac:.4f})"
+                    )
+            if len(lines) == 1:
+                lines.append("No outlier measurements recorded.")
+            text = "\n".join(lines)
+            self.logger.log_text(text, f"neurogenesis/class_{class_id}_outliers.txt")
 
         loader = tqdm(
             loader,

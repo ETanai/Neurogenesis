@@ -24,6 +24,7 @@ from models.ng_autoencoder import NGAutoEncoder
 from training.base_pretrainer import AutoencoderPretrainer, PretrainingConfig
 from training.incremental_trainer import IncrementalTrainer
 from training.neurogenesis_trainer import NeurogenesisTrainer
+from utils.dataset_replay import DatasetReplay
 from utils.intrinsic_replay import IntrinsicReplay
 from utils.thresholds import ThresholdEstimationConfig, ThresholdEstimator
 
@@ -150,146 +151,6 @@ class _NullLogger:
         return None
 
 
-class _TrainingDataReplay:
-    """
-    Simple replay buffer that stores flattened real samples per class and
-    returns them on demand instead of generating intrinsic samples.
-    """
-
-    def __init__(
-        self,
-        *,
-        input_dim: int,
-        max_per_class: int | None = None,
-        storage_device: torch.device | str = "cpu",
-    ) -> None:
-        self.input_dim = int(input_dim)
-        self.max_per_class = None if max_per_class is None else int(max_per_class)
-        self.device = torch.device(storage_device)
-        self.stats: Dict[int, Dict[str, torch.Tensor]] = {}
-        self._class_weights: Dict[int, float] = {}
-
-    def reset(self) -> None:
-        self.stats.clear()
-        self._class_weights = {}
-
-    def _normalize_samples(self, samples: torch.Tensor) -> torch.Tensor:
-        flat = samples.view(samples.size(0), -1)
-        if flat.size(1) != self.input_dim:
-            raise ValueError(
-                f"Replay sample dimensionality mismatch: expected {self.input_dim}, got {flat.size(1)}"
-            )
-        return flat.to(self.device)
-
-    @torch.no_grad()
-    def fit(
-        self,
-        dataloader: DataLoader,
-        *,
-        class_filter: Iterable[int] | None = None,
-    ) -> None:
-        filtered = set(int(c) for c in class_filter) if class_filter is not None else None
-        bucket: Dict[int, list[torch.Tensor]] = {}
-        quota = {cls: self.max_per_class for cls in (filtered or [])}
-
-        for images, labels in dataloader:
-            if filtered is not None:
-                mask = [int(lbl) in filtered for lbl in labels.tolist()]
-                if not any(mask):
-                    continue
-            flat = self._normalize_samples(images)
-            for sample, cls in zip(flat, labels.tolist()):
-                cls = int(cls)
-                if filtered is not None and cls not in filtered:
-                    continue
-                if self.max_per_class is not None:
-                    remaining = quota.get(cls, self.max_per_class)
-                    if remaining is not None and remaining <= 0:
-                        continue
-                    quota[cls] = remaining - 1 if remaining is not None else None
-                bucket.setdefault(cls, []).append(sample.detach().cpu())
-
-        for cls, samples in bucket.items():
-            if not samples:
-                continue
-            stacked = torch.stack(samples, dim=0)
-            if self.max_per_class is not None and stacked.size(0) > self.max_per_class:
-                perm = torch.randperm(stacked.size(0))[: self.max_per_class]
-                stacked = stacked[perm]
-            self.stats[cls] = {
-                "samples": stacked.to(self.device),
-                "count": int(stacked.size(0)),
-            }
-
-        if bucket:
-            self._refresh_default_weights()
-
-    def available_classes(self) -> list[int]:
-        return sorted(self.stats.keys())
-
-    def _refresh_default_weights(self) -> None:
-        if not self.stats:
-            self._class_weights = {}
-            return
-        uniform = 1.0 / len(self.stats)
-        self._class_weights = {cls: uniform for cls in self.stats}
-
-    def set_class_weights(self, weights: Dict[int, float]) -> None:
-        if not weights:
-            self._class_weights = {}
-            return
-        total = float(sum(weights.values()))
-        if total <= 0:
-            raise ValueError("Class weights must sum to a positive value")
-        self._class_weights = {int(k): float(v) for k, v in weights.items()}
-
-    def get_class_weights(self) -> Dict[int, float]:
-        return {int(k): float(v) for k, v in self._class_weights.items()}
-
-    def describe(self) -> Dict[int, Dict[str, float]]:
-        return {
-            int(cls): {"count": float(stats.get("count", 0))}
-            for cls, stats in self.stats.items()
-        }
-
-    def _sample_from_class(self, cls: int, n: int) -> torch.Tensor:
-        if cls not in self.stats:
-            raise KeyError(f"No dataset replay samples stored for class {cls}")
-        samples = self.stats[cls]["samples"]
-        if samples.numel() == 0:
-            raise RuntimeError(f"Replay buffer for class {cls} is empty")
-        idx = torch.randint(0, samples.size(0), (n,), device=samples.device)
-        return samples.index_select(0, idx).to(self.device)
-
-    @torch.no_grad()
-    def sample_images(
-        self,
-        cls: int | None,
-        n: int,
-        *,
-        class_weights: Dict[int, float] | None = None,
-    ) -> torch.Tensor:
-        if not self.stats:
-            raise RuntimeError("Dataset replay buffer is empty; call fit() first.")
-        if cls is None:
-            weights = class_weights or self._class_weights
-            if not weights:
-                raise RuntimeError("Class weights undefined for dataset replay sampling.")
-            classes = list(weights.keys())
-            probs = torch.tensor(
-                [weights[c] for c in classes],
-                dtype=torch.float32,
-                device=self.device,
-            )
-            probs = probs / probs.sum()
-            draws = torch.multinomial(probs, num_samples=n, replacement=True)
-            parts: list[torch.Tensor] = []
-            for cls_idx, count in zip(*torch.unique(draws, return_counts=True)):
-                parts.append(
-                    self._sample_from_class(int(classes[int(cls_idx)]), int(count))
-                )
-            return torch.cat(parts, dim=0)
-        return self._sample_from_class(int(cls), int(n))
 
 def _apply_experiment_model_overrides(cfg: DictConfig) -> None:
     exp_model = cfg.experiment.get("model") if hasattr(cfg.experiment, "get") else None
@@ -686,21 +547,16 @@ def _log_intrinsic_replay_examples(
         timeline_records.append(timeline_entry)
 
 
-def _log_ir_timeline(
-    records: list[dict],
-    *,
-    view_shape: tuple[int, ...] | None,
-    logger,
-) -> None:
-    if not records or view_shape is None or isinstance(logger, _NullLogger):
-        return
+def _render_ir_timeline(records: list[dict], view_shape: tuple[int, ...] | None):
+    if not records or view_shape is None:
+        return None
     try:
         import matplotlib.pyplot as plt
     except Exception:
-        return
+        return None
     class_ids = sorted({cls for rec in records for cls in rec.get("class_samples", {}).keys()})
     if not class_ids:
-        return
+        return None
     n_rows = len(records)
     n_cols = len(class_ids)
     fig, axes = plt.subplots(
@@ -732,8 +588,160 @@ def _log_ir_timeline(
 
     fig.suptitle("Intrinsic replay timeline", fontsize=12)
     fig.tight_layout(rect=[0, 0, 1, 0.95])
+    return fig
+
+
+def _render_recon_timeline(records: list[dict]):
+    if not records:
+        return None
+    try:
+        import matplotlib.pyplot as plt
+    except Exception:
+        return None
+    counts = [rec["original"].size(0) for rec in records if rec.get("original") is not None]
+    if not counts:
+        return None
+    n_cols = max(counts)
+    view_shape = tuple(records[0]["original"].shape[1:])
+    fig, axes = plt.subplots(
+        len(records) * 2,
+        n_cols,
+        figsize=(max(6.0, n_cols * 1.6), max(4.0, len(records) * 1.5)),
+        squeeze=False,
+    )
+    cmap = "gray" if len(view_shape) >= 1 and view_shape[0] == 1 else None
+    for idx, rec in enumerate(records):
+        originals = rec.get("original")
+        recons = rec.get("recon")
+        if originals is None or recons is None:
+            continue
+        orig_cols = originals.size(0)
+        recon_cols = recons.size(0)
+        learned_cols = min(rec.get("learned_boundary", orig_cols) or orig_cols, orig_cols)
+        row_orig = 2 * idx
+        row_recon = row_orig + 1
+        for col in range(n_cols):
+            if col >= orig_cols or col >= recon_cols:
+                axes[row_orig][col].axis("off")
+                axes[row_recon][col].axis("off")
+                continue
+            arr_orig = _prepare_plot_array(originals[col], view_shape)
+            axes[row_orig][col].imshow(arr_orig, cmap=cmap, vmin=0, vmax=1)
+            axes[row_orig][col].set_xticks([])
+            axes[row_orig][col].set_yticks([])
+            arr_recon = _prepare_plot_array(recons[col], view_shape)
+            axes[row_recon][col].imshow(arr_recon, cmap=cmap, vmin=0, vmax=1)
+            axes[row_recon][col].set_xticks([])
+            axes[row_recon][col].set_yticks([])
+            if col >= learned_cols:
+                for ax_sel in (axes[row_orig][col], axes[row_recon][col]):
+                    for spine in ax_sel.spines.values():
+                        spine.set_edgecolor("orange")
+                        spine.set_linewidth(2.0)
+        axes[row_orig][0].set_ylabel(rec.get("label", f"Step {idx}"), rotation=0, labelpad=30, ha="right", va="center", fontsize=9)
+        axes[row_recon][0].set_ylabel("Recon", rotation=0, labelpad=30, ha="right", va="center", fontsize=9)
+
+    fig.suptitle("Reconstruction timeline", fontsize=12)
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    return fig
+
+
+def _fig_to_image(fig):
+    try:
+        import matplotlib.pyplot as plt
+    except Exception:
+        return None
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight")
+    buf.seek(0)
+    try:
+        img = plt.imread(buf, format="png")
+    except Exception:
+        return None
+    return img
+
+
+def _log_combined_timeline(
+    recon_records: list[dict],
+    ir_records: list[dict],
+    *,
+    view_shape: tuple[int, ...] | None,
+    logger,
+) -> None:
+    if isinstance(logger, _NullLogger):
+        return
+    fig_recon = _render_recon_timeline(recon_records)
+    fig_ir = _render_ir_timeline(ir_records, view_shape)
+    if fig_recon is None and fig_ir is None:
+        return
+    try:
+        import matplotlib.pyplot as plt
+    except Exception:
+        return
+    images = []
+    labels = []
+    if fig_recon is not None:
+        img = _fig_to_image(fig_recon)
+        if img is not None:
+            images.append(img)
+            labels.append("Reconstruction timeline")
+        try:
+            plt.close(fig_recon)
+        except Exception:
+            pass
+    if fig_ir is not None:
+        img = _fig_to_image(fig_ir)
+        if img is not None:
+            images.append(img)
+            labels.append("Intrinsic replay timeline")
+        try:
+            plt.close(fig_ir)
+        except Exception:
+            pass
+    if not images:
+        return
+    heights = [img.shape[0] for img in images]
+    width = max(img.shape[1] for img in images)
+    fig, axes = plt.subplots(len(images), 1, figsize=(width / 80, sum(heights) / 80))
+    if len(images) == 1:
+        axes = [axes]
+    for ax, img, title in zip(axes, images, labels):
+        ax.imshow(img)
+        ax.set_title(title, fontsize=10)
+        ax.axis("off")
+    fig.tight_layout()
+    _log_matplotlib_artifacts(fig, logger, "figures/recon_ir_combined_timeline")
+    try:
+        plt.close(fig)
+    except Exception:
+        pass
+
+
+def _log_ir_timeline(records: list[dict], *, view_shape: tuple[int, ...] | None, logger) -> None:
+    if isinstance(logger, _NullLogger):
+        return
+    fig = _render_ir_timeline(records, view_shape)
+    if fig is None:
+        return
     _log_matplotlib_artifacts(fig, logger, "figures/ir_timeline")
     try:
+        import matplotlib.pyplot as plt
+
+        plt.close(fig)
+    except Exception:
+        pass
+
+
+def _log_recon_timeline(records: list[dict], logger) -> None:
+    if isinstance(logger, _NullLogger):
+        return
+    fig = _render_recon_timeline(records)
+    if fig is None:
+        return
+    _log_matplotlib_artifacts(fig, logger, "figures/reconstruction_timeline")
+    try:
+        import matplotlib.pyplot as plt
+
         plt.close(fig)
     except Exception:
         pass
@@ -746,6 +754,10 @@ def _log_reconstruction_artifacts(
     device: torch.device,
     logger,
     step: int,
+    *,
+    timeline_records: list[dict] | None = None,
+    stage_label: str | None = None,
+    timeline_max_samples: int | None = None,
 ) -> None:
     if isinstance(logger, _NullLogger) or plot_recon_grid_mlflow is None:
         return
@@ -797,6 +809,40 @@ def _log_reconstruction_artifacts(
         plt.close(fig)
     except Exception:
         pass
+
+    if timeline_records is not None:
+        outputs = None
+        try:
+            was_training = bool(getattr(model, "training", False))
+        except Exception:
+            was_training = None
+        with torch.no_grad():
+            try:
+                if hasattr(model, "eval"):
+                    model.eval()
+                outputs = model(images)
+            finally:
+                if was_training is not None and hasattr(model, "train"):
+                    model.train(was_training)
+        recon = None
+        if isinstance(outputs, dict):
+            recon = outputs.get("recon")
+        else:
+            recon = outputs
+        if recon is not None:
+            recon = recon.view(recon.size(0), *view_shape).detach().cpu()
+            max_cols = min(cpu_images.size(0), recon.size(0))
+            if timeline_max_samples is not None and timeline_max_samples > 0:
+                max_cols = min(max_cols, timeline_max_samples)
+            if max_cols > 0:
+                timeline_records.append(
+                    {
+                        "label": stage_label or f"Step {step}",
+                        "original": cpu_images[:max_cols].clone(),
+                        "recon": recon[:max_cols].clone(),
+                        "learned_boundary": min(boundary, max_cols),
+                    }
+                )
 
     if plot_partial_recon_grid_mlflow is not None:
         try:
@@ -968,6 +1014,10 @@ def _bootstrap_replay(
             if hasattr(replay, "set_class_weights"):
                 replay.set_class_weights({})
 
+    sync_fn = getattr(replay, "sync_encoder_latent_dim", None)
+    if callable(sync_fn):
+        sync_fn()
+
     t_total = time.perf_counter()
     for cls in classes:
         t_cls = time.perf_counter()
@@ -1111,6 +1161,7 @@ def run(cfg: DictConfig) -> None:
         ir_samples_per_class = default_samples
     ir_samples_per_class = max(1, int(ir_samples_per_class))
     ir_timeline_records: list[dict] = []
+    recon_timeline_records: list[dict] = []
     mlflow_cfg = cfg.logging.mlflow
     if mlflow_cfg.enabled and mlflow is None:
         print("[WARN] mlflow not available; disabling MLflow logging for this run.")
@@ -1151,6 +1202,7 @@ def run(cfg: DictConfig) -> None:
     use_replay = (regime_replay and replay_enabled) or (
         replay_mode == "dataset" and replay_enabled
     )
+    reuse_replay_stats = bool(cfg.replay.get("reuse_previous_stats", False))
 
     thresholds: List[float] = []
     if use_neurogenesis:
@@ -1164,14 +1216,21 @@ def run(cfg: DictConfig) -> None:
         thresholds = _collect_thresholds(model, threshold_loader, cfg, logger=logger)
         if len(thresholds) != len(cfg.model.hidden_sizes):
             raise RuntimeError("Threshold count does not match hidden layers")
-        # log resolved thresholds per level
+        thresh_factor = 1.0
+        try:
+            if bool(cfg.neurogenesis.early_stop.get("use_threshold_goal", False)):
+                thresh_factor = float(cfg.neurogenesis.early_stop.get("threshold_goal_factor", 1.0))
+        except AttributeError:
+            pass
         for i, thr in enumerate(thresholds):
             logger.log_metrics({f"threshold/level_{i}": float(thr)}, step=0)
+            logger.log_metrics({f"threshold/effective_level_{i}": float(thr * thresh_factor)}, step=0)
 
     replay = None
+    replay_partial_updates = False
     if use_replay:
         if replay_mode == "dataset":
-            replay = _TrainingDataReplay(
+            replay = DatasetReplay(
                 input_dim=cfg.model.input_dim,
                 max_per_class=cfg.replay.get("dataset_max_samples_per_class", None),
                 storage_device=cfg.replay.get("dataset_storage_device", "cpu"),
@@ -1198,6 +1257,7 @@ def run(cfg: DictConfig) -> None:
             step=len(cfg.experiment.base_classes),
         )
         _log_replay_stats(replay, logger, step=len(cfg.experiment.base_classes))
+        replay_partial_updates = reuse_replay_stats and isinstance(replay, IntrinsicReplay)
 
     if use_neurogenesis:
         trainer = NeurogenesisTrainer(
@@ -1234,8 +1294,17 @@ def run(cfg: DictConfig) -> None:
     trainer.log_global_sizes()
     eval_records: list[dict] = []
     eval_records.extend(_evaluate(trainer, dm, learned, cfg, step=len(learned), logger=logger))
+    base_stage_label = f"Step {len(learned)} (base)"
     _log_reconstruction_artifacts(
-        model, dm, all_classes, len(learned), device, logger, step=len(learned)
+        model,
+        dm,
+        all_classes,
+        len(learned),
+        device,
+        logger,
+        step=len(learned),
+        timeline_records=recon_timeline_records,
+        stage_label=base_stage_label,
     )
     _log_intrinsic_replay_examples(
         replay,
@@ -1245,7 +1314,7 @@ def run(cfg: DictConfig) -> None:
         step=len(learned),
         samples_per_class=ir_samples_per_class,
         timeline_records=ir_timeline_records,
-        stage_label=f"Step {len(learned)} (base)",
+        stage_label=base_stage_label,
     )
 
     for stage, class_id in enumerate(cfg.experiment.incremental_classes, start=1):
@@ -1261,13 +1330,18 @@ def run(cfg: DictConfig) -> None:
         trainer.log_global_sizes()
         if replay is not None:
             t_boot_inc0 = time.perf_counter()
+            classes_for_fit = learned_so_far
+            reset_stats = True
+            if replay_partial_updates:
+                classes_for_fit = [class_id]
+                reset_stats = False
             _bootstrap_replay(
                 replay,
                 dm,
-                learned_so_far,
+                classes_for_fit,
                 batch_size=min(cfg.replay.stats_batch_size, cfg.data.batch_size),
                 num_workers=cfg.data.num_workers,
-                reset_stats=True,
+                reset_stats=reset_stats,
             )
             logger.log_metrics(
                 {"timing/replay_update_sec": time.perf_counter() - t_boot_inc0},
@@ -1278,7 +1352,15 @@ def run(cfg: DictConfig) -> None:
         eval_records.extend(_evaluate(trainer, dm, learned, cfg, step=len(learned), logger=logger))
         t_fig0 = time.perf_counter()
         _log_reconstruction_artifacts(
-            model, dm, all_classes, len(learned), device, logger, step=len(learned)
+            model,
+            dm,
+            all_classes,
+            len(learned),
+            device,
+            logger,
+            step=len(learned),
+            timeline_records=recon_timeline_records,
+            stage_label=f"Step {len(learned)} (added {class_id})",
         )
         logger.log_metrics(
             {"timing/recon_artifacts_sec": time.perf_counter() - t_fig0}, step=len(learned)
@@ -1307,6 +1389,13 @@ def run(cfg: DictConfig) -> None:
 
     _log_eval_records(eval_records, logger)
     _log_ir_timeline(ir_timeline_records, view_shape=view_shape, logger=logger)
+    _log_recon_timeline(recon_timeline_records, logger)
+    _log_combined_timeline(
+        recon_timeline_records,
+        ir_timeline_records,
+        view_shape=view_shape,
+        logger=logger,
+    )
     logger.log_metrics({"timing/total_run_sec": time.perf_counter() - t_run0})
     logger.finish()
     return {"model": model, "trainer": trainer, "replay": replay, "training_stats": training_stats}
