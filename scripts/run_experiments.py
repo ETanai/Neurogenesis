@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import inspect
+import io
 import math
 import tempfile
 import time
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
 import hydra
+import numpy as np
 import torch
 import tqdm
 from omegaconf import DictConfig, OmegaConf
@@ -528,6 +530,214 @@ def _maybe_make_visual_batch(
     return stacked, label_tensor, splits
 
 
+def _infer_view_shape(dm) -> tuple[int, ...] | None:
+    candidates = []
+    for attr in (
+        "full_train",
+        "full_val",
+        "full",
+        "train_dataset",
+        "val_dataset",
+        "dataset",
+        "data",
+    ):
+        ds = getattr(dm, attr, None)
+        if ds is not None:
+            candidates.append(ds)
+
+    for ds in candidates:
+        sample = None
+        try:
+            if hasattr(ds, "__len__") and len(ds) == 0:
+                continue
+        except Exception:
+            pass
+        try:
+            sample = ds[0]
+        except Exception:
+            continue
+
+        if isinstance(sample, (list, tuple)) and sample:
+            sample = sample[0]
+        if sample is None:
+            continue
+        if torch.is_tensor(sample):
+            return tuple(sample.shape)
+        try:
+            arr = np.array(sample)
+        except Exception:
+            continue
+        if arr.size == 0:
+            continue
+        return tuple(arr.shape)
+    return None
+
+
+def _prepare_plot_array(tensor: torch.Tensor, view_shape: tuple[int, ...] | None) -> np.ndarray:
+    arr = tensor.detach().cpu().float().numpy()
+    if view_shape is not None and arr.shape != view_shape:
+        try:
+            arr = arr.reshape(view_shape)
+        except Exception:
+            pass
+    if arr.ndim == 3:
+        if arr.shape[0] in (1, 3):
+            arr = np.transpose(arr, (1, 2, 0))
+            if arr.shape[-1] == 1:
+                arr = arr[..., 0]
+        elif arr.shape[-1] in (1, 3):
+            if arr.shape[-1] == 1:
+                arr = arr[..., 0]
+        else:
+            arr = arr.mean(axis=0)
+    elif arr.ndim > 3:
+        arr = arr.reshape(arr.shape[0], -1)
+        arr = arr.mean(axis=0)
+    arr = np.clip(arr, 0.0, 1.0)
+    return arr
+
+
+def _log_matplotlib_artifacts(fig, logger, artifact_basename: str) -> None:
+    if isinstance(logger, _NullLogger):
+        return
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=200, bbox_inches="tight")
+    buf.seek(0)
+    logger.log_image(buf.getvalue(), f"{artifact_basename}.png")
+    logger.log_figure(fig, f"{artifact_basename}.mpl.png")
+
+
+def _log_intrinsic_replay_examples(
+    replay: IntrinsicReplay | None,
+    *,
+    classes: Sequence[int],
+    view_shape: tuple[int, ...] | None,
+    logger,
+    step: int,
+    samples_per_class: int,
+    timeline_records: list[dict] | None = None,
+    stage_label: str | None = None,
+) -> None:
+    if not isinstance(replay, IntrinsicReplay):
+        return
+    if view_shape is None or isinstance(logger, _NullLogger):
+        return
+    classes = sorted({int(c) for c in classes})
+    if not classes or samples_per_class <= 0:
+        return
+    try:
+        import matplotlib.pyplot as plt
+    except Exception:
+        return
+
+    collected: list[tuple[int, torch.Tensor]] = []
+    timeline_entry: dict | None = None
+    if timeline_records is not None:
+        timeline_entry = {
+            "step": step,
+            "label": stage_label or f"Step {step}",
+            "class_samples": {},
+        }
+
+    for cls in classes:
+        try:
+            imgs = replay.sample_image_tensors(cls, samples_per_class, view_shape=view_shape)
+        except Exception:
+            continue
+        imgs = imgs.detach().cpu()
+        collected.append((int(cls), imgs))
+        if timeline_entry is not None:
+            timeline_entry["class_samples"][int(cls)] = imgs.clone()
+
+    if not collected:
+        return
+
+    fig, axes = plt.subplots(
+        len(collected),
+        samples_per_class,
+        figsize=(max(6.0, samples_per_class * 1.3), max(3.0, len(collected) * 1.3)),
+        squeeze=False,
+    )
+    cmap = "gray" if len(view_shape) >= 1 and view_shape[0] == 1 else None
+    for row_idx, (cls, imgs) in enumerate(collected):
+        for col_idx in range(min(samples_per_class, imgs.size(0))):
+            ax = axes[row_idx][col_idx]
+            arr = _prepare_plot_array(imgs[col_idx], view_shape)
+            if arr.ndim == 2:
+                ax.imshow(arr, cmap=cmap, vmin=0, vmax=1)
+            else:
+                ax.imshow(arr, vmin=0, vmax=1)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            if col_idx == 0:
+                ax.set_ylabel(f"Class {cls}", rotation=0, labelpad=30, ha="right", va="center", fontsize=9)
+        for col_idx in range(imgs.size(0), samples_per_class):
+            axes[row_idx][col_idx].axis("off")
+
+    fig.suptitle(f"Intrinsic replay samples (step {step})", fontsize=12)
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    _log_matplotlib_artifacts(fig, logger, f"figures/ir_examples_step_{step}")
+    try:
+        plt.close(fig)
+    except Exception:
+        pass
+
+    if timeline_entry is not None and timeline_entry["class_samples"]:
+        timeline_records.append(timeline_entry)
+
+
+def _log_ir_timeline(
+    records: list[dict],
+    *,
+    view_shape: tuple[int, ...] | None,
+    logger,
+) -> None:
+    if not records or view_shape is None or isinstance(logger, _NullLogger):
+        return
+    try:
+        import matplotlib.pyplot as plt
+    except Exception:
+        return
+    class_ids = sorted({cls for rec in records for cls in rec.get("class_samples", {}).keys()})
+    if not class_ids:
+        return
+    n_rows = len(records)
+    n_cols = len(class_ids)
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(max(6.0, n_cols * 1.4), max(4.0, n_rows * 1.2)),
+        squeeze=False,
+    )
+    cmap = "gray" if len(view_shape) >= 1 and view_shape[0] == 1 else None
+    for row_idx, rec in enumerate(records):
+        label = rec.get("label") or f"Step {rec.get('step', row_idx)}"
+        class_samples = rec.get("class_samples", {})
+        for col_idx, cls in enumerate(class_ids):
+            ax = axes[row_idx][col_idx]
+            samples = class_samples.get(cls)
+            if samples is None or samples.numel() == 0:
+                ax.axis("off")
+                continue
+            arr = _prepare_plot_array(samples[0], view_shape)
+            if arr.ndim == 2:
+                ax.imshow(arr, cmap=cmap, vmin=0, vmax=1)
+            else:
+                ax.imshow(arr, vmin=0, vmax=1)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            if row_idx == 0:
+                ax.set_title(f"Class {cls}", fontsize=9)
+        axes[row_idx][0].set_ylabel(label, rotation=0, labelpad=25, ha="right", va="center", fontsize=9)
+
+    fig.suptitle("Intrinsic replay timeline", fontsize=12)
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+    _log_matplotlib_artifacts(fig, logger, "figures/ir_timeline")
+    try:
+        plt.close(fig)
+    except Exception:
+        pass
+
 def _log_reconstruction_artifacts(
     model,
     dm,
@@ -892,6 +1102,15 @@ def run(cfg: DictConfig) -> None:
     }
 
     dm = _instantiate_datamodule(cfg.data, cfg.model)
+    view_shape = _infer_view_shape(dm)
+    log_cfg = getattr(cfg, "logging", {})
+    default_samples = 6
+    if hasattr(log_cfg, "get"):
+        ir_samples_per_class = int(log_cfg.get("ir_samples_per_class", default_samples) or default_samples)
+    else:
+        ir_samples_per_class = default_samples
+    ir_samples_per_class = max(1, int(ir_samples_per_class))
+    ir_timeline_records: list[dict] = []
     mlflow_cfg = cfg.logging.mlflow
     if mlflow_cfg.enabled and mlflow is None:
         print("[WARN] mlflow not available; disabling MLflow logging for this run.")
@@ -1018,6 +1237,16 @@ def run(cfg: DictConfig) -> None:
     _log_reconstruction_artifacts(
         model, dm, all_classes, len(learned), device, logger, step=len(learned)
     )
+    _log_intrinsic_replay_examples(
+        replay,
+        classes=learned,
+        view_shape=view_shape,
+        logger=logger,
+        step=len(learned),
+        samples_per_class=ir_samples_per_class,
+        timeline_records=ir_timeline_records,
+        stage_label=f"Step {len(learned)} (base)",
+    )
 
     for stage, class_id in enumerate(cfg.experiment.incremental_classes, start=1):
         subset = _get_class_dataset(dm, class_id, split="train")
@@ -1054,6 +1283,16 @@ def run(cfg: DictConfig) -> None:
         logger.log_metrics(
             {"timing/recon_artifacts_sec": time.perf_counter() - t_fig0}, step=len(learned)
         )
+        _log_intrinsic_replay_examples(
+            replay,
+            classes=learned,
+            view_shape=view_shape,
+            logger=logger,
+            step=len(learned),
+            samples_per_class=ir_samples_per_class,
+            timeline_records=ir_timeline_records,
+            stage_label=f"Step {len(learned)} (added {class_id})",
+        )
 
     if use_neurogenesis:
         training_stats["neurogenesis_parameter_updates"] = getattr(model, "update_steps", 0)
@@ -1067,6 +1306,7 @@ def run(cfg: DictConfig) -> None:
     _log_training_stats(logger, training_stats)
 
     _log_eval_records(eval_records, logger)
+    _log_ir_timeline(ir_timeline_records, view_shape=view_shape, logger=logger)
     logger.log_metrics({"timing/total_run_sec": time.perf_counter() - t_run0})
     logger.finish()
     return {"model": model, "trainer": trainer, "replay": replay, "training_stats": training_stats}
