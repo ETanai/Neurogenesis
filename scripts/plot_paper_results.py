@@ -9,8 +9,10 @@ import re
 import sqlite3
 import statistics
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable
+from typing import Dict, Iterable, Tuple
+from urllib.parse import urlparse
 
 import matplotlib.pyplot as plt
 from omegaconf import OmegaConf
@@ -22,6 +24,136 @@ from hydra.core.global_hydra import GlobalHydra
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MLFLOW_DB = REPO_ROOT / "mlflow.db"
 ARTIFACT_ROOT = REPO_ROOT / "mlartifacts"
+FILE_STORE_ROOT = REPO_ROOT / "mlruns"
+
+
+@dataclass(frozen=True)
+class RunInfo:
+    run_id: str
+    params: Dict[str, str]
+    run_root: Path
+
+
+def _strip_quotes(value: str) -> str:
+    value = value.strip()
+    if value and value[0] in {'"', "'"} and value[-1] == value[0]:
+        return value[1:-1]
+    return value
+
+
+def _read_simple_meta(path: Path) -> Dict[str, str]:
+    if not path.exists():
+        return {}
+    data: Dict[str, str] = {}
+    with path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            data[key.strip()] = _strip_quotes(value.strip())
+    return data
+
+
+def _read_params_dir(params_dir: Path) -> Dict[str, str]:
+    params: Dict[str, str] = {}
+    if not params_dir.exists():
+        return params
+    for entry in params_dir.iterdir():
+        if entry.is_file():
+            params[entry.name] = entry.read_text(encoding="utf-8").strip()
+    return params
+
+
+def _artifact_root_from_uri(uri: str | None) -> Path | None:
+    if not uri:
+        return None
+    parsed = urlparse(uri)
+    if parsed.scheme and parsed.scheme != "file":
+        return None
+    path = Path(parsed.path)
+    # Most URIs end with /artifacts; strip that to obtain the run root.
+    if path.name == "artifacts":
+        return path.parent
+    return path
+
+
+def _gather_runs_from_sqlite(experiment_name: str) -> Tuple[bool, list[RunInfo]]:
+    if not MLFLOW_DB.exists():
+        return False, []
+    with sqlite3.connect(MLFLOW_DB) as conn:
+        exp_row = conn.execute(
+            "SELECT experiment_id FROM experiments WHERE name=?",
+            (experiment_name,),
+        ).fetchone()
+        if exp_row is None:
+            return False, []
+        experiment_id = str(exp_row[0])
+        run_rows = conn.execute(
+            "SELECT run_uuid, artifact_uri FROM runs WHERE experiment_id=? AND status='FINISHED'",
+            (experiment_id,),
+        ).fetchall()
+        runs: list[RunInfo] = []
+        for run_id, artifact_uri in run_rows:
+            run_params = _gather_run_params(conn, run_id)
+            run_root = _artifact_root_from_uri(artifact_uri)
+            if run_root is None:
+                run_root = ARTIFACT_ROOT / experiment_id / run_id
+            runs.append(RunInfo(run_id=run_id, params=run_params, run_root=run_root))
+    return True, runs
+
+
+def _gather_runs_from_file_store(experiment_name: str) -> Tuple[bool, list[RunInfo]]:
+    if not FILE_STORE_ROOT.exists():
+        return False, []
+    target_dir: Path | None = None
+    for entry in FILE_STORE_ROOT.iterdir():
+        if not entry.is_dir() or entry.name.startswith('.'):
+            continue
+        meta = _read_simple_meta(entry / "meta.yaml")
+        if meta.get("name") == experiment_name:
+            target_dir = entry
+            break
+    if target_dir is None:
+        return False, []
+    runs: list[RunInfo] = []
+    for run_dir in sorted(target_dir.iterdir()):
+        if not run_dir.is_dir() or run_dir.name.startswith('.'):
+            continue
+        meta = _read_simple_meta(run_dir / "meta.yaml")
+        if not meta:
+            continue
+        status = meta.get("status", "")
+        if str(status) not in {"3", "FINISHED"}:
+            continue
+        params = _read_params_dir(run_dir / "params")
+        run_id = meta.get("run_id", run_dir.name)
+        artifact_uri = meta.get("artifact_uri")
+        run_root = _artifact_root_from_uri(artifact_uri) or run_dir
+        runs.append(RunInfo(run_id=run_id, params=params, run_root=run_root))
+    return True, runs
+
+
+def _collect_runs(experiment_name: str) -> list[RunInfo]:
+    found, runs = _gather_runs_from_sqlite(experiment_name)
+    if found:
+        if not runs:
+            raise RuntimeError(
+                f"No completed runs found for experiment '{experiment_name}' in {MLFLOW_DB}."
+            )
+        return runs
+    found, runs = _gather_runs_from_file_store(experiment_name)
+    if found:
+        if not runs:
+            raise RuntimeError(
+                f"No completed runs found for experiment '{experiment_name}' in {FILE_STORE_ROOT}."
+            )
+        return runs
+    raise RuntimeError(
+        f"No MLflow experiment named '{experiment_name}' found in {MLFLOW_DB} or {FILE_STORE_ROOT}."
+    )
 
 
 def _parse_args() -> argparse.Namespace:
@@ -93,9 +225,8 @@ def _pick_metrics_file(run_dir: Path) -> Path | None:
     return candidates[0] if candidates else None
 
 
-def _load_run_series(experiment_id: str, run_id: str, target_layer: int | None) -> dict[int, float]:
-    run_dir = ARTIFACT_ROOT / str(experiment_id) / run_id
-    csv_path = _pick_metrics_file(run_dir)
+def _load_run_series(run_root: Path, target_layer: int | None) -> dict[int, float]:
+    csv_path = _pick_metrics_file(run_root)
     if not csv_path:
         return {}
     rows = _load_metrics_csv(csv_path)
@@ -112,9 +243,8 @@ def _load_run_series(experiment_id: str, run_id: str, target_layer: int | None) 
     return series
 
 
-def _load_run_series_all_layers(experiment_id: str, run_id: str) -> dict[int, dict[int, float]]:
-    run_dir = ARTIFACT_ROOT / str(experiment_id) / run_id
-    csv_path = _pick_metrics_file(run_dir)
+def _load_run_series_all_layers(run_root: Path) -> dict[int, dict[int, float]]:
+    csv_path = _pick_metrics_file(run_root)
     if not csv_path:
         return {}
     rows = _load_metrics_csv(csv_path)
@@ -165,39 +295,24 @@ def plot_from_config(
     output_path = Path(output_path)
     json_path = Path(json_path) if json_path else None
 
-    with sqlite3.connect(MLFLOW_DB) as conn:
-        exp_row = conn.execute(
-            "SELECT experiment_id FROM experiments WHERE name=?", (experiment_name,)
-        ).fetchone()
-        if exp_row is None:
-            raise RuntimeError(
-                f"No MLflow experiment named '{experiment_name}' found in {MLFLOW_DB}."
-            )
-        experiment_id = exp_row[0]
+    run_infos = _collect_runs(experiment_name)
 
-        run_rows = conn.execute(
-            "SELECT run_uuid FROM runs WHERE experiment_id=? AND status='FINISHED'",
-            (experiment_id,),
-        ).fetchall()
-        if not run_rows:
-            raise RuntimeError(f"No completed runs found for experiment '{experiment_name}'.")
+    label_lookup = {
+        entry.get("name"): entry.get("description", entry.get("name"))
+        for entry in cfg.get("runs", [])
+    }
+    group_series: dict[str, list[dict[int, float]]] = defaultdict(list)
 
-        label_lookup = {
-            entry.get("name"): entry.get("description", entry.get("name"))
-            for entry in cfg.get("runs", [])
-        }
-        group_series: dict[str, list[dict[int, float]]] = defaultdict(list)
-
-        for (run_id,) in run_rows:
-            params = _gather_run_params(conn, run_id)
-            paper_tag = params.get("paper_experiment", "")
-            run_name = params.get("mlflow.runName", run_id)
-            group = _normalize_group_name(paper_tag, fallback=run_name)
-            series = _load_run_series(str(experiment_id), run_id, target_layer=layer)
-            if not series:
-                print(f"[WARN] Missing metrics for run {run_id}; skipping.")
-                continue
-            group_series[group].append(series)
+    for run in run_infos:
+        params = run.params
+        paper_tag = params.get("paper_experiment", "")
+        run_name = params.get("mlflow.runName", run.run_id)
+        group = _normalize_group_name(paper_tag, fallback=run_name)
+        series = _load_run_series(run.run_root, target_layer=layer)
+        if not series:
+            print(f"[WARN] Missing metrics for run {run.run_id}; skipping.")
+            continue
+        group_series[group].append(series)
 
     if not group_series:
         raise RuntimeError("No metric series found to plot.")
@@ -280,19 +395,32 @@ def _digit_labels(base: list[int], incr: list[int]) -> list[str]:
     return labels
 
 
-def _load_neuron_series(conn: sqlite3.Connection, run_id: str) -> dict[int, dict[int, float]]:
-    rows = conn.execute(
-        "SELECT key, value, step FROM metrics WHERE run_uuid=? AND key LIKE 'global_level_%_size'",
-        (run_id,),
-    ).fetchall()
+_NEURON_METRIC_PATTERN = re.compile(r"global_level_(\d+)_size")
+
+
+def _load_neuron_series_from_files(run_root: Path) -> dict[int, dict[int, float]]:
+    metrics_dir = run_root / "metrics"
+    if not metrics_dir.exists():
+        return {}
     data: dict[int, dict[int, float]] = defaultdict(dict)
-    for key, value, step in rows:
-        try:
-            parts = key.split("_")
-            level = int(parts[2])
-        except (IndexError, ValueError):
+    for metric_file in metrics_dir.iterdir():
+        if not metric_file.is_file():
             continue
-        data[level][int(step)] = float(value)
+        match = _NEURON_METRIC_PATTERN.match(metric_file.name)
+        if not match:
+            continue
+        level = int(match.group(1))
+        with metric_file.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                parts = line.strip().split()
+                if len(parts) < 3:
+                    continue
+                try:
+                    value = float(parts[1])
+                    step = int(float(parts[2]))
+                except ValueError:
+                    continue
+                data[level][step] = value
     return data
 
 
@@ -320,29 +448,19 @@ def plot_figure4_panels(
     )
     neuron_series_runs: list[dict[int, dict[int, float]]] = []
 
-    with sqlite3.connect(MLFLOW_DB) as conn:
-        exp_row = conn.execute(
-            "SELECT experiment_id FROM experiments WHERE name=?", (experiment_name,)
-        ).fetchone()
-        if exp_row is None:
-            raise RuntimeError(f"No MLflow experiment named '{experiment_name}'.")
-        experiment_id = exp_row[0]
-        run_rows = conn.execute(
-            "SELECT run_uuid FROM runs WHERE experiment_id=? AND status='FINISHED'",
-            (experiment_id,),
-        ).fetchall()
-        if not run_rows:
-            raise RuntimeError(f"No runs found for experiment '{experiment_name}'.")
-        for (run_id,) in run_rows:
-            params = _gather_run_params(conn, run_id)
-            group = _normalize_group_name(params.get("paper_experiment", ""), params.get("mlflow.runName", run_id))
-            layer_series = _load_run_series_all_layers(str(experiment_id), run_id)
-            if not layer_series:
-                continue
-            for layer_idx, series in layer_series.items():
-                group_layer_series[group][layer_idx].append(series)
-            if group == "ndl_ir":
-                neuron_series_runs.append(_load_neuron_series(conn, run_id))
+    run_infos = _collect_runs(experiment_name)
+    for run in run_infos:
+        params = run.params
+        group = _normalize_group_name(
+            params.get("paper_experiment", ""), params.get("mlflow.runName", run.run_id)
+        )
+        layer_series = _load_run_series_all_layers(run.run_root)
+        if not layer_series:
+            continue
+        for layer_idx, series in layer_series.items():
+            group_layer_series[group][layer_idx].append(series)
+        if group == "ndl_ir":
+            neuron_series_runs.append(_load_neuron_series_from_files(run.run_root))
 
     if not group_layer_series:
         raise RuntimeError("No per-layer series found for Figure 4 generation.")
@@ -456,7 +574,6 @@ def plot_figure4_panels(
     ax_neuron.set_xlabel("Digit")
     ax_neuron.set_ylabel("Number of Neurons")
     if neuron_series_runs:
-        neuron_data = defaultdict(list)
         level_stats: dict[int, list[dict[int, float]]] = defaultdict(list)
         for series in neuron_series_runs:
             for level_idx, entries in series.items():
