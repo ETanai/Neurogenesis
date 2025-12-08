@@ -1,11 +1,12 @@
 # Controls how many neurons can be added per layer during neurogenesis.
-max_nodes: [100, 100, 100, 10]        # maximum number of new nodes per layer
-max_outlier_fraction: 0.05     # cap on fraction of units considered outliers
+max_nodes: [100, 100, 100, 20]        # maximum number of new nodes per layer
+max_outlier_fraction: 0.01     # cap on fraction of units considered outliers
+replay_old_limit: null        # cap total replay samples per class during stability (null = unlimited)
 
 # Phase lengths (in optimizer steps) for neurogenesis training cycles.
-plasticity_epochs: 100         # allow weights to adapt freely
-stability_epochs: 100          # consolidate before evaluating new neurons
-next_layer_epochs: 100         # train once the next layer has new neurons
+plasticity_epochs: 500         # allow weights to adapt freely
+stability_epochs: 500          # consolidate before evaluating new neurons
+next_layer_epochs: 500         # train once the next layer has new neurons
 
 factor_max_new_nodes: 0.1      # fraction of max_nodes eligible for creation
 factor_new_nodes: 0.0002         # actual fraction of nodes to add per cycle
@@ -15,4 +16,4 @@ early_stop:
   patience: 2                  # stop neurogenesis after N non-improving phases
   mode: min                    # mode is 'min' or 'max' per EarlyStopper; pick what to optimize.
   use_threshold_goal: true     # optionally stop once reconstruction falls below the level threshold
-  threshold_goal_factor: 1.2  # multiplicative factor applied to the per-level threshold when enabled
+  threshold_goal_factor: 0.9  # multiplicative factor applied to the per-level threshold when enabled

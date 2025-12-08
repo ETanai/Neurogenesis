@@ -78,9 +78,15 @@ class DummyAE:
         old_x=None,
         early_stop_cfg=None,
         forward_fn=None,
+        epoch_logger=None,
     ):
-        replay_size = 0 if old_x is None else old_x.size(0)
-        self.stability_calls.append((level, epochs, lr, replay_size))
+        if callable(old_x):
+            replay_descr = "callable"
+        elif isinstance(old_x, torch.Tensor):
+            replay_descr = f"tensor:{old_x.size(0)}"
+        else:
+            replay_descr = "none"
+        self.stability_calls.append((level, epochs, lr, replay_descr))
         return {"epoch_loss": [0.5]}
 
 

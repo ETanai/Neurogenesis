@@ -15,6 +15,9 @@ from omegaconf import OmegaConf, open_dict
 from scripts.run_experiments import run
 from scripts.plot_paper_results import plot_from_config, plot_figure4_panels
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+_DEFAULT_MLFLOW_DIR = (REPO_ROOT / "mlruns").resolve()
+
 try:
     import mlflow
 except ImportError:  # pragma: no cover - optional dependency
@@ -101,6 +104,13 @@ def _log_summary_run(
                 mlflow.log_artifact(str(artifact), artifact_path="summary")
 
 
+def _default_tracking_uri() -> str:
+    """Return a file-based MLflow tracking URI under the repo's mlruns directory."""
+
+    _DEFAULT_MLFLOW_DIR.mkdir(parents=True, exist_ok=True)
+    return _DEFAULT_MLFLOW_DIR.as_uri()
+
+
 def run_from_config(config_path: Path) -> None:
     data = OmegaConf.to_container(OmegaConf.load(config_path), resolve=True)
     if not isinstance(data, dict):
@@ -113,6 +123,14 @@ def run_from_config(config_path: Path) -> None:
     mlflow_cfg = data.get("mlflow", {}) or {}
     experiment_name_base = mlflow_cfg.get("experiment_name")
     tracking_uri = mlflow_cfg.get("tracking_uri")
+    if tracking_uri:
+        resolved_tracking_uri = tracking_uri
+    else:
+        resolved_tracking_uri = _default_tracking_uri()
+        print(
+            "[run_paper_config] No MLflow tracking URI provided; defaulting to local file store "
+            f"at {resolved_tracking_uri}."
+        )
     run_prefix = mlflow_cfg.get("run_name_prefix", config_path.stem)
     timestamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     experiment_name = f"{experiment_name_base}_{timestamp}" if experiment_name_base else None
@@ -142,8 +160,7 @@ def run_from_config(config_path: Path) -> None:
                 cfg.paper_experiment = f"{config_path.stem}/{run_name}{rep_suffix}"
                 if experiment_name:
                     cfg.logging.mlflow.experiment_name = experiment_name
-                if tracking_uri:
-                    cfg.logging.mlflow.tracking_uri = tracking_uri
+                cfg.logging.mlflow.tracking_uri = resolved_tracking_uri
             print(
                 "\n=== Running {cfg_name}: {desc} | repeat {cur}/{total} | seed={seed} ===".format(
                     cfg_name=config_path.stem,
@@ -175,7 +192,7 @@ def run_from_config(config_path: Path) -> None:
 
         _log_summary_run(
             experiment_name=experiment_name,
-            tracking_uri=tracking_uri,
+            tracking_uri=resolved_tracking_uri,
             config_path=config_path,
             repetitions=repetitions,
             runs_per_rep=len(runs),

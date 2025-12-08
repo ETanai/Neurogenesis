@@ -1,6 +1,6 @@
 # Replay configuration shared across experiments.
 enabled: true                   # disable to turn replay off entirely
-mode: dataset                 # intrinsic (decoder-based) or dataset (stored real samples)
+mode: intrinsic                 # intrinsic (decoder-based) or dataset (stored real samples)
 cov_eps: 1.0e-4                 # numerical epsilon added when inverting covariances
 stats_batch_size: 1024           # number of real samples to estimate replay statistics
 batch_ratio: 1.0                # replay mini-batches vs. real batches (1.0 = 50/50)

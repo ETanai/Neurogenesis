@@ -1,6 +1,7 @@
 from copy import deepcopy
 from functools import partial
 from typing import Callable, Dict, List, Optional, Union
+from typing import cast
 
 import torch
 import torch.nn.functional as F
@@ -30,6 +31,7 @@ _ACTS: dict[str, Callable[..., nn.Module]] = {
 }
 
 EpochSummary = Dict[str, Union[int, float, str]]
+ReplaySampler = Callable[[int], Optional[Tensor]]
 
 
 class EarlyStopper:
@@ -396,7 +398,7 @@ class NGAutoEncoder(nn.Module):
         level: int,
         lr: float,
         epochs: int,
-        old_x: Optional[torch.Tensor],
+        old_x: Optional[Union[torch.Tensor, ReplaySampler]],
         early_stop_cfg: Optional[dict] = None,
         forward_fn: Optional[Callable[[Tensor], Tensor]] = None,
         epoch_logger: Optional[Callable[[int, EpochSummary], None]] = None,
@@ -419,7 +421,7 @@ class NGAutoEncoder(nn.Module):
         loader: torch.utils.data.DataLoader,
         optim: torch.optim.Optimizer,
         epochs: int,
-        replay: Optional[torch.Tensor] = None,
+        replay: Optional[Union[torch.Tensor, ReplaySampler]] = None,
         *,
         early_stopper: Optional[EarlyStopper] = None,
         forward_fn: Optional[Callable[[Tensor], Tensor]] = None,
@@ -468,11 +470,20 @@ class NGAutoEncoder(nn.Module):
                 # -- concat (replay) timing --
                 t0 = perf_counter()
                 if replay is not None:
-                    k = x.size(0)
-                    idx = torch.randint(0, replay.size(0), (k,), device=device)
-                    replay_batch = replay[idx].to(device)
-                    replay_batch = replay_batch.view(k, -1)
-                    x = torch.cat([x, replay_batch], dim=0)
+                    k = int(x.size(0))
+                    replay_batch: Optional[Tensor] = None
+                    if callable(replay):
+                        replay_batch = replay(k)
+                    else:
+                        pool = cast(torch.Tensor, replay)
+                        if pool.size(0) > 0 and k > 0:
+                            idx = torch.randint(0, pool.size(0), (k,), device=pool.device)
+                            replay_batch = pool.index_select(0, idx)
+                    if replay_batch is not None and replay_batch.numel() > 0:
+                        if replay_batch.device != device:
+                            replay_batch = replay_batch.to(device, non_blocking=True)
+                        replay_batch = replay_batch.view(replay_batch.size(0), -1)
+                        x = torch.cat([x, replay_batch], dim=0)
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
                 t1 = perf_counter()

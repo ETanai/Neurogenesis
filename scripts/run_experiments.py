@@ -1014,10 +1014,6 @@ def _bootstrap_replay(
             if hasattr(replay, "set_class_weights"):
                 replay.set_class_weights({})
 
-    sync_fn = getattr(replay, "sync_encoder_latent_dim", None)
-    if callable(sync_fn):
-        sync_fn()
-
     t_total = time.perf_counter()
     for cls in classes:
         t_cls = time.perf_counter()
@@ -1202,7 +1198,6 @@ def run(cfg: DictConfig) -> None:
     use_replay = (regime_replay and replay_enabled) or (
         replay_mode == "dataset" and replay_enabled
     )
-    reuse_replay_stats = bool(cfg.replay.get("reuse_previous_stats", False))
 
     thresholds: List[float] = []
     if use_neurogenesis:
@@ -1227,7 +1222,6 @@ def run(cfg: DictConfig) -> None:
             logger.log_metrics({f"threshold/effective_level_{i}": float(thr * thresh_factor)}, step=0)
 
     replay = None
-    replay_partial_updates = False
     if use_replay:
         if replay_mode == "dataset":
             replay = DatasetReplay(
@@ -1257,7 +1251,6 @@ def run(cfg: DictConfig) -> None:
             step=len(cfg.experiment.base_classes),
         )
         _log_replay_stats(replay, logger, step=len(cfg.experiment.base_classes))
-        replay_partial_updates = reuse_replay_stats and isinstance(replay, IntrinsicReplay)
 
     if use_neurogenesis:
         trainer = NeurogenesisTrainer(
@@ -1274,6 +1267,7 @@ def run(cfg: DictConfig) -> None:
             factor_new_nodes=cfg.neurogenesis.factor_new_nodes,
             logger=logger,
             early_stop_cfg=cfg.neurogenesis.early_stop,
+            replay_old_limit=cfg.neurogenesis.get("replay_old_limit", None),
         )
     else:
         trainer = IncrementalTrainer(
@@ -1330,18 +1324,13 @@ def run(cfg: DictConfig) -> None:
         trainer.log_global_sizes()
         if replay is not None:
             t_boot_inc0 = time.perf_counter()
-            classes_for_fit = learned_so_far
-            reset_stats = True
-            if replay_partial_updates:
-                classes_for_fit = [class_id]
-                reset_stats = False
             _bootstrap_replay(
                 replay,
                 dm,
-                classes_for_fit,
+                learned_so_far,
                 batch_size=min(cfg.replay.stats_batch_size, cfg.data.batch_size),
                 num_workers=cfg.data.num_workers,
-                reset_stats=reset_stats,
+                reset_stats=True,
             )
             logger.log_metrics(
                 {"timing/replay_update_sec": time.perf_counter() - t_boot_inc0},

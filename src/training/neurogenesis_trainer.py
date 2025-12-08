@@ -1,5 +1,5 @@
 import math
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
 import torch
 from pytorch_lightning.loggers import MLFlowLogger
@@ -33,6 +33,7 @@ class NeurogenesisTrainer:
         logger: MLFlowLogger = None,
         mean_layer_losses=None,
         early_stop_cfg: dict = None,
+        replay_old_limit: int | None = None,
     ):
         self.ae = ae
         self.ir = ir
@@ -45,6 +46,7 @@ class NeurogenesisTrainer:
         self.factor_new_nodes = factor_new_nodes
         self.mean_layer_losses = mean_layer_losses
         self.early_stop_cfg = early_stop_cfg
+        self.replay_old_limit = None if replay_old_limit is None else int(replay_old_limit)
 
         # counter for how many classes we've learned so far
         self._class_count = 0
@@ -69,13 +71,38 @@ class NeurogenesisTrainer:
         if not self.logger:
             return
         fraction = n_outliers / max(total_seen, 1)
-        self.logger.log_metrics(
-            {
-                f"class_{class_id}_level_{level}_iter_{iteration}_n_outliers": n_outliers,
-                f"class_{class_id}_level_{level}_iter_{iteration}_outlier_fraction": fraction,
-            },
-            step=iteration,
-        )
+        metric_prefix = f"class_{class_id}"
+        metrics = {
+            f"{metric_prefix}/level_{level}_n_outliers_round": n_outliers,
+            f"{metric_prefix}/level_{level}_outlier_fraction_round": fraction,
+        }
+        self.logger.log_metrics(metrics, step=iteration)
+
+    def _build_replay_sampler(self, device: torch.device) -> Callable[[int], Optional[torch.Tensor]] | None:
+        if self.ir is None or not self.ir.available_classes():
+            return None
+        remaining = self.replay_old_limit
+
+        def _sample(batch_size: int) -> Optional[torch.Tensor]:
+            sync_fn = getattr(self.ir, "sync_encoder_latent_dim", None)
+            if callable(sync_fn):
+                try:
+                    sync_fn()
+                except Exception:
+                    pass
+            nonlocal remaining
+            take = int(batch_size)
+            if take <= 0:
+                return None
+            if remaining is not None:
+                if remaining <= 0:
+                    return None
+                take = min(take, remaining)
+                remaining -= take
+            replay_flat = self.ir.sample_images(None, take)
+            return replay_flat.to(device, non_blocking=True)
+
+        return _sample
 
     def _build_phase_early_stop_cfg(self, level: Optional[int] = None) -> Optional[dict]:
         """Return a per-phase early-stop config with optional threshold goal."""
@@ -102,13 +129,17 @@ class NeurogenesisTrainer:
     def _get_recon_errors(self, loader: DataLoader, level: int) -> Tensor:
         """
         Compute reconstruction errors at specified encoder level for all samples in loader.
+        Returns a CPU tensor to avoid building gigantic autograd graphs on the GPU.
         """
-        errors = []
-        for batch in loader:
-            x = batch[0].to(self._model_device())
-            x_hat = self.ae.forward_partial(x, level)
-            errors.append(self.ae.reconstruction_error(x_hat, x))
-        return torch.cat(errors)
+        device = self._model_device()
+        errors: list[Tensor] = []
+        with torch.no_grad():
+            for batch in loader:
+                x = batch[0].to(device, non_blocking=True)
+                x_hat = self.ae.forward_partial(x, level)
+                err = self.ae.reconstruction_error(x_hat, x).detach().cpu()
+                errors.append(err)
+        return torch.cat(errors) if errors else torch.empty(0)
 
     def _get_outliers(self, loader: DataLoader, level: int):
         device = self._model_device()
@@ -194,16 +225,6 @@ class NeurogenesisTrainer:
 
         def _callback(epoch_idx: int, summary: dict):
             phase = summary.get("phase", "train")
-            metrics = {}
-            for key, value in summary.items():
-                if key == "epoch":
-                    continue
-                if isinstance(value, (float, int)):
-                    metrics[
-                        f"{metric_prefix}/{phase}_level_{level}_round_{round_idx}_{key}"
-                    ] = float(value)
-            if metrics:
-                self.logger.log_metrics(metrics, step=epoch_idx + 1)
             if callable(log_dict_fn):
                 payload = {
                     "class_id": class_id,
@@ -229,10 +250,7 @@ class NeurogenesisTrainer:
             self.logger.log_metrics({"classes_learned": self._class_count}, step=self._class_count)
 
         device = self._model_device()
-        old_x = None
-        dataset_size = len(loader.dataset)
-        if self.ir is not None and self.ir.available_classes() and dataset_size > 0:
-            old_x = self.ir.sample_images(None, dataset_size).to(device)
+        replay_sampler = self._build_replay_sampler(device)
 
         pbar_levels = tqdm(range(num_layers), desc=f"[Class {class_id}] Layers", unit="lvl")
         for level in pbar_levels:
@@ -341,7 +359,7 @@ class NeurogenesisTrainer:
                     level=stability_level,
                     lr=self.base_lr,
                     epochs=self.stability_epochs,
-                    old_x=old_x,
+                    old_x=replay_sampler,
                     early_stop_cfg=phase_es_cfg,
                     epoch_logger=epoch_logger,
                 )
@@ -423,7 +441,7 @@ class NeurogenesisTrainer:
                     level + 1,
                     lr=self.base_lr / 100,
                     epochs=self.stability_epochs,
-                    old_x=old_x,
+                    old_x=replay_sampler,
                     early_stop_cfg=self._build_phase_early_stop_cfg(level + 1),
                 )
 
