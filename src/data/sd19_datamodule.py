@@ -72,6 +72,7 @@ class SD19DataModule(pl.LightningDataModule):
         # defaults for limiting (optional)
         default_per_class_limit_train: Optional[int] = None,
         default_per_class_limit_val: Optional[int] = None,
+        invert_colors: bool = False,
         index_seed: int = 42,
         download: bool = True,
         download_url: str | None = DEFAULT_SD19_URL,
@@ -93,6 +94,7 @@ class SD19DataModule(pl.LightningDataModule):
         self._resize_progress_min_files = max(0, int(resize_progress_min_files))
         self._resize_progress_bar = bool(resize_progress_bar)
         self._split_index_sets: Dict[str, set] = {"train": set(), "val": set()}
+        self._invert_colors = bool(invert_colors)
 
         # define transforms once (will be rebuilt in setup for image_size)
         self.train_tfms = transforms.ToTensor() #transforms.Compose([transforms.RandomRotation(10), transforms.ToTensor()])
@@ -365,11 +367,9 @@ class SD19DataModule(pl.LightningDataModule):
         tfms = []
         if self.hparams.image_size is not None and not self._offline_resize_done:
             tfms.append(transforms.Resize((self.hparams.image_size, self.hparams.image_size)))
-        if train:
-            # tfms += [transforms.RandomRotation(10), transforms.ToTensor()]
-            tfms.append(transforms.ToTensor())
-        else:
-            tfms.append(transforms.ToTensor())
+        tfms.append(transforms.ToTensor())
+        if self._invert_colors:
+            tfms.append(transforms.Lambda(lambda x: 1.0 - x))
         return transforms.Compose(tfms)
 
     def _cache_path(self) -> Path:

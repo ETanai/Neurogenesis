@@ -1,5 +1,5 @@
-# Base Hydra defaults that select the core model and datamodule.
 defaults:
+# Base Hydra defaults that select the core model and datamodule.
   - model: ae              # options: ae (baseline AE) or ng_autoencoder (neurogenesis).
   - datamodule: mnist      # dataset key; choose among mnist, sd19, or toy datamodules.
 

@@ -44,6 +44,7 @@ class AutoencoderPretrainer:
         *,
         val_loader: Optional[DataLoader] = None,
         log_fn: Optional[callable] = None,
+        epoch_hook: Optional[callable] = None,
     ) -> Dict[str, list[float]]:
         history: Dict[str, list[float]] = {"train_loss": []}
         if val_loader is not None:
@@ -65,6 +66,12 @@ class AutoencoderPretrainer:
                 if log_fn is not None:
                     log_fn({"pretrain/val_loss": val_loss}, epoch)
                     log_fn({"timing/val_epoch_sec": time.perf_counter() - t1}, epoch)
+
+            if epoch_hook is not None:
+                try:
+                    epoch_hook(epoch)
+                except Exception:
+                    pass
 
         return history
 

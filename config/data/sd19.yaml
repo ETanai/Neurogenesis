@@ -12,3 +12,4 @@ resize_progress_min_files: 500               # require at least this many files 
 val_split: 0.2                               # fraction of data reserved for validation
 default_per_class_limit_train: null          # cap train samples per class (null keeps all); useful for quick prototyping
 default_per_class_limit_val: null            # cap val samples per class for balanced validation
+invert_colors: true                          # flip white background to black to match MNIST polarity

@@ -199,6 +199,7 @@ def _instantiate_datamodule(cfg: DictConfig, model_cfg: DictConfig) -> MNISTData
             resize_progress_min_files=cfg.get("resize_progress_min_files", 500),
             default_per_class_limit_train=cfg.get("default_per_class_limit_train", None),
             default_per_class_limit_val=cfg.get("default_per_class_limit_val", None),
+            invert_colors=cfg.get("invert_colors", False),
         )
     elif name == "toy":
         from data.toy_datamodule import ToyDataModule  # lazy import
@@ -1071,7 +1072,34 @@ def _pretrain(
             leave=False,
         )
 
-    trainer.fit(train_loader, val_loader=val_loader, log_fn=logger.log_metrics)
+    threshold_subset = _get_combined_dataset(dm, base_classes, split="train")
+    threshold_loader = _dataloader(
+        threshold_subset,
+        batch_size=cfg.data.batch_size,
+        num_workers=cfg.data.num_workers,
+        shuffle=False,
+    )
+
+    def _log_pretrain_thresholds(epoch_idx: int) -> None:
+        if isinstance(logger, _NullLogger):
+            return
+        thresh_cfg = ThresholdEstimationConfig(
+            percentile=cfg.experiment.threshold.percentile,
+            margin=cfg.experiment.threshold.margin,
+            minimum=cfg.experiment.threshold.minimum,
+        )
+        estimator = ThresholdEstimator(model, config=thresh_cfg)
+        values = estimator.estimate(threshold_loader)
+        metrics = {f"pretrain/threshold_level_{i}": float(v) for i, v in enumerate(values)}
+        logger.log_metrics(metrics, step=epoch_idx)
+
+    epoch_hook = _log_pretrain_thresholds if bool(cfg.training.get("log_pretrain_thresholds", True)) else None
+    trainer.fit(
+        train_loader,
+        val_loader=val_loader,
+        log_fn=logger.log_metrics,
+        epoch_hook=epoch_hook,
+    )
     logger.log_metrics({"timing/pretrain_total_sec": time.perf_counter() - t0})
     return trainer
 
@@ -1201,16 +1229,29 @@ def run(cfg: DictConfig) -> None:
 
     thresholds: List[float] = []
     if use_neurogenesis:
-        threshold_subset = _get_combined_dataset(dm, cfg.experiment.base_classes, split="train")
-        threshold_loader = _dataloader(
-            threshold_subset,
-            batch_size=cfg.data.batch_size,
-            num_workers=cfg.data.num_workers,
-            shuffle=False,
-        )
-        thresholds = _collect_thresholds(model, threshold_loader, cfg, logger=logger)
+        manual_thresholds = None
+        try:
+            manual_thresholds = cfg.neurogenesis.get("thresholds", None)
+        except Exception:
+            manual_thresholds = None
+
+        if manual_thresholds is not None:
+            thresholds = [float(v) for v in list(manual_thresholds)]
+        else:
+            threshold_subset = _get_combined_dataset(dm, cfg.experiment.base_classes, split="train")
+            threshold_loader = _dataloader(
+                threshold_subset,
+                batch_size=cfg.data.batch_size,
+                num_workers=cfg.data.num_workers,
+                shuffle=False,
+            )
+            thresholds = _collect_thresholds(model, threshold_loader, cfg, logger=logger)
+
         if len(thresholds) != len(cfg.model.hidden_sizes):
-            raise RuntimeError("Threshold count does not match hidden layers")
+            raise RuntimeError(
+                "Threshold count does not match hidden layers: "
+                f"got {len(thresholds)} thresholds for {len(cfg.model.hidden_sizes)} hidden layers."
+            )
         thresh_factor = 1.0
         try:
             if bool(cfg.neurogenesis.early_stop.get("use_threshold_goal", False)):
