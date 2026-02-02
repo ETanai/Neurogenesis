@@ -34,6 +34,11 @@ class NeurogenesisTrainer:
         mean_layer_losses=None,
         early_stop_cfg: dict = None,
         replay_old_limit: int | None = None,
+        stability_replay_mode: str = "ratio",
+        stability_replay_ratio: float = 1.0,
+        stability_replay_ratio_base: float = 1.0,
+        stability_replay_ratio_max: float = 4.0,
+        stability_replay_balanced_max_ratio: float = 4.0,
     ):
         self.ae = ae
         self.ir = ir
@@ -47,6 +52,13 @@ class NeurogenesisTrainer:
         self.mean_layer_losses = mean_layer_losses
         self.early_stop_cfg = early_stop_cfg
         self.replay_old_limit = None if replay_old_limit is None else int(replay_old_limit)
+        self.stability_replay_mode = str(stability_replay_mode or "ratio").lower()
+        self.stability_replay_ratio = float(stability_replay_ratio)
+        self.stability_replay_ratio_base = float(stability_replay_ratio_base)
+        self.stability_replay_ratio_max = float(stability_replay_ratio_max)
+        self.stability_replay_balanced_max_ratio = float(stability_replay_balanced_max_ratio)
+        self._phase_loss_history: dict[tuple[Any, int, int, str], list[float]] = {}
+        self._recon_eval_batch: torch.Tensor | None = None
 
         # counter for how many classes we've learned so far
         self._class_count = 0
@@ -78,10 +90,25 @@ class NeurogenesisTrainer:
         }
         self.logger.log_metrics(metrics, step=iteration)
 
-    def _build_replay_sampler(self, device: torch.device) -> Callable[[int], Optional[torch.Tensor]] | None:
+    def _build_replay_sampler(
+        self, device: torch.device, *, n_old_classes: int
+    ) -> tuple[Callable[[int], Optional[torch.Tensor]] | None, bool]:
         if self.ir is None or not self.ir.available_classes():
-            return None
+            return None, False
         remaining = self.replay_old_limit
+        mode = self.stability_replay_mode
+        replay_only = mode == "only"
+        if mode == "ratio_schedule":
+            ratio = min(
+                self.stability_replay_ratio_base * max(n_old_classes, 1),
+                self.stability_replay_ratio_max,
+            )
+        elif mode == "balanced":
+            ratio = min(max(n_old_classes, 1), self.stability_replay_balanced_max_ratio)
+        else:
+            ratio = self.stability_replay_ratio
+
+        ratio = max(float(ratio), 0.0)
 
         def _sample(batch_size: int) -> Optional[torch.Tensor]:
             sync_fn = getattr(self.ir, "sync_encoder_latent_dim", None)
@@ -91,7 +118,7 @@ class NeurogenesisTrainer:
                 except Exception:
                     pass
             nonlocal remaining
-            take = int(batch_size)
+            take = int(math.ceil(batch_size * ratio))
             if take <= 0:
                 return None
             if remaining is not None:
@@ -102,15 +129,23 @@ class NeurogenesisTrainer:
             replay_flat = self.ir.sample_images(None, take)
             return replay_flat.to(device, non_blocking=True)
 
-        return _sample
+        return _sample, replay_only
 
-    def _build_phase_early_stop_cfg(self, level: Optional[int] = None) -> Optional[dict]:
+    def _build_phase_early_stop_cfg(
+        self, level: Optional[int] = None, *, phase: Optional[str] = None
+    ) -> Optional[dict]:
         """Return a per-phase early-stop config with optional threshold goal."""
         if not self.early_stop_cfg:
             return None
         cfg = dict(self.early_stop_cfg)
         use_goal = cfg.pop("use_threshold_goal", False)
         factor = cfg.pop("threshold_goal_factor", 1.0)
+        factor_plasticity = cfg.pop("threshold_goal_factor_plasticity", None)
+        factor_stability = cfg.pop("threshold_goal_factor_stability", None)
+        if phase == "plasticity" and factor_plasticity is not None:
+            factor = float(factor_plasticity)
+        elif phase == "stability" and factor_stability is not None:
+            factor = float(factor_stability)
         if use_goal and self.thresholds:
             idx = len(self.thresholds) - 1 if level is None else max(level, 0)
             idx = min(idx, len(self.thresholds) - 1)
@@ -222,6 +257,7 @@ class NeurogenesisTrainer:
         metric_prefix = f"class_{class_id}"
         artifact_prefix = f"plasticity/class_{class_id}/level_{level}/round_{round_idx}"
         log_dict_fn = getattr(self.logger, "log_dict", None)
+        log_metrics_fn = getattr(self.logger, "log_metrics", None)
 
         def _callback(epoch_idx: int, summary: dict):
             phase = summary.get("phase", "train")
@@ -235,8 +271,55 @@ class NeurogenesisTrainer:
                     **summary,
                 }
                 log_dict_fn(payload, f"{artifact_prefix}/epoch_{epoch_idx + 1}.json")
+            if "loss" in summary:
+                key = (class_id, level, round_idx, str(phase))
+                self._phase_loss_history.setdefault(key, []).append(float(summary["loss"]))
+            if callable(log_metrics_fn) and "loss" in summary:
+                loss = float(summary["loss"])
+                metrics = {
+                    f"{phase}/class_{class_id}/level_{level}/round_{round_idx}_loss": loss
+                }
+                log_metrics_fn(metrics, step=epoch_idx + 1)
+            if callable(log_metrics_fn) and "eval_loss" in summary:
+                eval_loss = float(summary["eval_loss"])
+                metrics = {
+                    f"{phase}/class_{class_id}/level_{level}/round_{round_idx}_eval_loss": eval_loss
+                }
+                log_metrics_fn(metrics, step=epoch_idx + 1)
 
         return _callback
+
+    def _log_phase_loss_plot(self, class_id: Any, level: int, round_idx: int) -> None:
+        if not self.logger:
+            return
+        try:
+            import matplotlib.pyplot as plt
+        except Exception:
+            return
+        plast_key = (class_id, level, round_idx, "plasticity")
+        stab_key = (class_id, level, round_idx, "stability")
+        plast = self._phase_loss_history.get(plast_key, [])
+        stab = self._phase_loss_history.get(stab_key, [])
+        if not plast and not stab:
+            return
+        fig, ax = plt.subplots(figsize=(6, 4))
+        if plast:
+            ax.plot(range(1, len(plast) + 1), plast, label="plasticity")
+        if stab:
+            ax.plot(range(1, len(stab) + 1), stab, label="stability")
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Loss")
+        ax.set_title(f"Class {class_id} Level {level} Round {round_idx}")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        artifact = f"figures/phase_losses/class_{class_id}/level_{level}/round_{round_idx}.png"
+        try:
+            self.logger.log_figure(fig, artifact)
+        finally:
+            plt.close(fig)
+
+    def set_recon_eval_batch(self, batch: torch.Tensor | None) -> None:
+        self._recon_eval_batch = batch
 
     def learn_class(self, class_id: Any, loader: DataLoader) -> None:
         num_layers = len(self.ae.hidden_sizes)
@@ -250,7 +333,10 @@ class NeurogenesisTrainer:
             self.logger.log_metrics({"classes_learned": self._class_count}, step=self._class_count)
 
         device = self._model_device()
-        replay_sampler = self._build_replay_sampler(device)
+        n_old_classes = len(self.ir.available_classes()) if self.ir is not None else 0
+        replay_sampler, replay_only = self._build_replay_sampler(
+            device, n_old_classes=n_old_classes
+        )
 
         pbar_levels = tqdm(range(num_layers), desc=f"[Class {class_id}] Layers", unit="lvl")
         for level in pbar_levels:
@@ -319,7 +405,7 @@ class NeurogenesisTrainer:
                 last_loss = 1
                 round_idx = added + 1
                 epoch_logger = self._build_epoch_logger(class_id, level, round_idx)
-                phase_es_cfg = self._build_phase_early_stop_cfg(level)
+                phase_es_cfg = self._build_phase_early_stop_cfg(level, phase="plasticity")
 
                 hist = self.ae.plasticity_phase(
                     loader=outliers_loader,
@@ -354,15 +440,21 @@ class NeurogenesisTrainer:
 
                 last_loss = 1
                 stability_level = int(len(self.ae.encoder) / 2) - 1
+                phase_es_cfg = self._build_phase_early_stop_cfg(level, phase="stability")
                 hist = self.ae.stability_phase(
                     loader=outliers_loader,
                     level=stability_level,
                     lr=self.base_lr,
                     epochs=self.stability_epochs,
                     old_x=replay_sampler,
+                    replay_only=replay_only,
+                    eval_batch=self._recon_eval_batch,
+                    early_stop_on_eval=self._recon_eval_batch is not None,
                     early_stop_cfg=phase_es_cfg,
                     epoch_logger=epoch_logger,
                 )
+
+                self._log_phase_loss_plot(class_id, level, round_idx)
 
                 mean_loss = hist["epoch_loss"][-1]
                 delta_loss = last_loss - mean_loss if last_loss is not None else float("inf")
@@ -429,20 +521,25 @@ class NeurogenesisTrainer:
 
             # Next-layer plasticity & stability
             if level + 1 < num_layers and step_plasticety > 0:
+                phase_es_cfg = self._build_phase_early_stop_cfg(level + 1, phase="plasticity")
                 self.ae.plasticity_phase(
                     loader,
                     level + 1,
                     epochs=self.next_layer_epochs,
                     lr=self.base_lr / 100,
-                    early_stop_cfg=self._build_phase_early_stop_cfg(level + 1),
+                    early_stop_cfg=phase_es_cfg,
                 )
+                phase_es_cfg = self._build_phase_early_stop_cfg(level + 1, phase="stability")
                 self.ae.stability_phase(
                     loader,
                     level + 1,
                     lr=self.base_lr / 100,
                     epochs=self.stability_epochs,
                     old_x=replay_sampler,
-                    early_stop_cfg=self._build_phase_early_stop_cfg(level + 1),
+                    replay_only=replay_only,
+                    eval_batch=self._recon_eval_batch,
+                    early_stop_on_eval=self._recon_eval_batch is not None,
+                    early_stop_cfg=phase_es_cfg,
                 )
 
             if self.logger:

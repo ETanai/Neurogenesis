@@ -399,6 +399,9 @@ class NGAutoEncoder(nn.Module):
         lr: float,
         epochs: int,
         old_x: Optional[Union[torch.Tensor, ReplaySampler]],
+        replay_only: bool = False,
+        eval_batch: Optional[torch.Tensor] = None,
+        early_stop_on_eval: bool = False,
         early_stop_cfg: Optional[dict] = None,
         forward_fn: Optional[Callable[[Tensor], Tensor]] = None,
         epoch_logger: Optional[Callable[[int, EpochSummary], None]] = None,
@@ -410,6 +413,9 @@ class NGAutoEncoder(nn.Module):
             opt,
             epochs,
             replay=old_x,
+            replay_only=replay_only,
+            eval_batch=eval_batch,
+            early_stop_on_eval=early_stop_on_eval,
             early_stopper=es,
             forward_fn=forward_fn,
             epoch_logger=epoch_logger,
@@ -422,6 +428,9 @@ class NGAutoEncoder(nn.Module):
         optim: torch.optim.Optimizer,
         epochs: int,
         replay: Optional[Union[torch.Tensor, ReplaySampler]] = None,
+        replay_only: bool = False,
+        eval_batch: Optional[torch.Tensor] = None,
+        early_stop_on_eval: bool = False,
         *,
         early_stopper: Optional[EarlyStopper] = None,
         forward_fn: Optional[Callable[[Tensor], Tensor]] = None,
@@ -483,7 +492,10 @@ class NGAutoEncoder(nn.Module):
                         if replay_batch.device != device:
                             replay_batch = replay_batch.to(device, non_blocking=True)
                         replay_batch = replay_batch.view(replay_batch.size(0), -1)
-                        x = torch.cat([x, replay_batch], dim=0)
+                        if replay_only:
+                            x = replay_batch
+                        else:
+                            x = torch.cat([x, replay_batch], dim=0)
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
                 t1 = perf_counter()
@@ -558,6 +570,20 @@ class NGAutoEncoder(nn.Module):
                 "phase": loop_label,
             }
 
+            eval_loss = None
+            if eval_batch is not None:
+                with torch.no_grad():
+                    eval_x = eval_batch.to(device, non_blocking=True).view(
+                        eval_batch.size(0), -1
+                    )
+                    if forward_fn is None:
+                        out = self.forward(eval_x)
+                        eval_hat = out["recon"] if isinstance(out, dict) else out
+                    else:
+                        eval_hat = forward_fn(eval_x)
+                    eval_loss = float(self.reconstruction_error(eval_hat, eval_x).mean().item())
+                summary["eval_loss"] = eval_loss
+
             # epoch timing summary
             # if n_batches > 0:
             #     tqdm.write(
@@ -572,8 +598,10 @@ class NGAutoEncoder(nn.Module):
                     # keep training loop robust against logging issues
                     pass
 
-            if early_stopper and early_stopper.step(epoch_loss):
-                break
+            if early_stopper:
+                signal = eval_loss if (early_stop_on_eval and eval_loss is not None) else epoch_loss
+                if early_stopper.step(signal):
+                    break
         return history
 
     def _plastic_to_mature(self):

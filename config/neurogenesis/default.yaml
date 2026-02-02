@@ -17,4 +17,17 @@ early_stop:
   patience: 2                  # stop neurogenesis after N non-improving phases
   mode: min                    # mode is 'min' or 'max' per EarlyStopper; pick what to optimize.
   use_threshold_goal: true     # optionally stop once reconstruction falls below the level threshold
-  threshold_goal_factor: 0.8  # multiplicative factor applied to the per-level threshold when enabled
+  threshold_goal_factor: 0.8  # fallback multiplicative factor when phase-specific values are not set
+  threshold_goal_factor_plasticity: 0.9  # plasticity-specific threshold multiplier
+  threshold_goal_factor_stability: 0.7  # stability-specific threshold multiplier
+
+# Stability replay strategy:
+#   ratio          -> replay_ratio * batch_size
+#   ratio_schedule -> min(replay_ratio_base * n_old_classes, replay_ratio_max) * batch_size
+#   balanced       -> min(n_old_classes, replay_balanced_max_ratio) * batch_size
+#   only           -> use replay only (no new-class samples)
+stability_replay_mode: only
+stability_replay_ratio: 1.0
+stability_replay_ratio_base: 1.0
+stability_replay_ratio_max: 4.0
+stability_replay_balanced_max_ratio: 4.0

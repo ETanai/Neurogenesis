@@ -59,8 +59,29 @@ class _MLflowLogger:
         exclude_prefixes = filt.get("exclude_prefixes") or []
         self._include_prefixes: tuple[str, ...] = tuple(include_prefixes)
         self._exclude_prefixes: tuple[str, ...] = tuple(exclude_prefixes)
+        self._class_metrics: str = str(filt.get("class_metrics", "full")).lower()
+
+    def _allow_class_metric(self, key: str) -> bool:
+        if self._class_metrics == "off":
+            return False
+        if self._class_metrics == "full":
+            return True
+        if self._class_metrics != "summary":
+            return True
+        # Summary-only class metrics: keep growth + size + avg loss + outlier fraction.
+        if "/growth_level_" in key:
+            return True
+        if "_level_" in key and (key.endswith("_size") or key.endswith("_cumulative_size")):
+            return True
+        if "_avg_loss_iter" in key:
+            return True
+        if key.endswith("_outlier_fraction") or key.endswith("_outlier_fraction_round"):
+            return True
+        return False
 
     def _should_log(self, key: str) -> bool:
+        if key.startswith("class_") and not self._allow_class_metric(key):
+            return False
         if self._include_prefixes:
             return any(key.startswith(prefix) for prefix in self._include_prefixes)
         if self._exclude_prefixes and any(key.startswith(prefix) for prefix in self._exclude_prefixes):
@@ -1309,6 +1330,13 @@ def run(cfg: DictConfig) -> None:
             logger=logger,
             early_stop_cfg=cfg.neurogenesis.early_stop,
             replay_old_limit=cfg.neurogenesis.get("replay_old_limit", None),
+            stability_replay_mode=cfg.neurogenesis.get("stability_replay_mode", "ratio"),
+            stability_replay_ratio=cfg.neurogenesis.get("stability_replay_ratio", 1.0),
+            stability_replay_ratio_base=cfg.neurogenesis.get("stability_replay_ratio_base", 1.0),
+            stability_replay_ratio_max=cfg.neurogenesis.get("stability_replay_ratio_max", 4.0),
+            stability_replay_balanced_max_ratio=cfg.neurogenesis.get(
+                "stability_replay_balanced_max_ratio", 4.0
+            ),
         )
     else:
         trainer = IncrementalTrainer(
@@ -1356,6 +1384,11 @@ def run(cfg: DictConfig) -> None:
         subset = _get_class_dataset(dm, class_id, split="train")
         t_learn0 = time.perf_counter()
         loader = _train_loader_for_classes(dm, [class_id], shuffle=True)
+        if isinstance(trainer, NeurogenesisTrainer):
+            eval_sample = _maybe_make_visual_batch(dm, learned, device)
+            if eval_sample is not None:
+                eval_images, _, _ = eval_sample
+                trainer.set_recon_eval_batch(eval_images)
         trainer.learn_class(class_id, loader)
         logger.log_metrics(
             {"timing/learn_class_sec": time.perf_counter() - t_learn0}, step=len(learned) + 1
