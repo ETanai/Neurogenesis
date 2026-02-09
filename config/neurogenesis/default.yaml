@@ -26,7 +26,7 @@ early_stop:
 #   ratio_schedule -> min(replay_ratio_base * n_old_classes, replay_ratio_max) * batch_size
 #   balanced       -> min(n_old_classes, replay_balanced_max_ratio) * batch_size
 #   only           -> use replay only (no new-class samples)
-stability_replay_mode: only
+stability_replay_mode: ratio
 stability_replay_ratio: 1.0
 stability_replay_ratio_base: 1.0
 stability_replay_ratio_max: 4.0

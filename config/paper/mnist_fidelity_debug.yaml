@@ -1,0 +1,144 @@
+description: "MNIST fidelity-first debug matrix for image quality and neurogenesis growth."
+repetitions: 1
+seed:
+  base: 42
+  strategy: sequential
+
+mlflow:
+  experiment_name: neurogenesis-mnist-fidelity-debug
+  run_name_prefix: mnist_fidelity
+
+runs:
+  # 1) Behavior-correctness validation
+  - name: cl
+    description: "Fixed network baseline without replay."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - experiment.regime=cl
+      - replay.enabled=false
+      - enforce_paper_fidelity=true
+
+  - name: cl_ir
+    description: "Fixed network with intrinsic replay."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - experiment.regime=cl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - enforce_paper_fidelity=true
+
+  - name: ndl
+    description: "Neurogenesis without replay using paper MNIST preset."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl
+      - replay.enabled=false
+      - enforce_paper_fidelity=true
+
+  - name: ndl_ir
+    description: "Neurogenesis with intrinsic replay using paper MNIST preset."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - enforce_paper_fidelity=true
+
+  # 2) Thresholds ablation (manual vs estimated)
+  - name: ndl_ir_thresholds_estimated
+    description: "NDL+IR with estimated thresholds from base classes."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - neurogenesis.thresholds=null
+      - enforce_paper_fidelity=true
+
+  # 3) Replay-ratio ablation
+  - name: ndl_ir_ratio_05
+    description: "NDL+IR with stability replay ratio 0.5."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=0.5
+      - enforce_paper_fidelity=true
+
+  - name: ndl_ir_ratio_10
+    description: "NDL+IR with stability replay ratio 1.0."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=1.0
+      - enforce_paper_fidelity=true
+
+  - name: ndl_ir_ratio_20
+    description: "NDL+IR with stability replay ratio 2.0."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=2.0
+      - enforce_paper_fidelity=true
+
+  # 4) Growth-rate ablation
+  - name: ndl_ir_growth_small
+    description: "NDL+IR with conservative growth factors."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - neurogenesis.factor_new_nodes=0.005
+      - neurogenesis.factor_max_new_nodes=0.1
+      - enforce_paper_fidelity=true
+
+  - name: ndl_ir_growth_base
+    description: "NDL+IR with baseline growth factors from paper preset."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - neurogenesis.factor_new_nodes=0.01
+      - neurogenesis.factor_max_new_nodes=0.2
+      - enforce_paper_fidelity=true
+
+  - name: ndl_ir_growth_large
+    description: "NDL+IR with aggressive growth factors."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - neurogenesis.factor_new_nodes=0.02
+      - neurogenesis.factor_max_new_nodes=0.3
+      - enforce_paper_fidelity=true

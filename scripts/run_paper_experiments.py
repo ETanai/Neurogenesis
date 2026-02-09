@@ -47,6 +47,7 @@ PAPER_EXPERIMENTS: tuple[PaperExperiment, ...] = (
             "experiment=mnist_incremental",
             "experiment.regime=cl_ir",
             "replay.enabled=true",
+            "replay.mode=intrinsic",
         ),
     ),
     PaperExperiment(
@@ -55,6 +56,7 @@ PAPER_EXPERIMENTS: tuple[PaperExperiment, ...] = (
         overrides=(
             "data=mnist",
             "experiment=mnist_incremental",
+            "neurogenesis=paper_mnist",
             "experiment.regime=ndl",
             "replay.enabled=false",
         ),
@@ -65,13 +67,15 @@ PAPER_EXPERIMENTS: tuple[PaperExperiment, ...] = (
         overrides=(
             "data=mnist",
             "experiment=mnist_incremental",
+            "neurogenesis=paper_mnist",
             "experiment.regime=ndl_ir",
             "replay.enabled=true",
+            "replay.mode=intrinsic",
         ),
     ),
     PaperExperiment(
         name="sd19_ndl",
-        description="SD-19 neurogenesis without intrinsic replay (training data replay).",
+        description="SD-19 neurogenesis without intrinsic replay (dataset replay).",
         overrides=(
             "data=sd19",
             "experiment=sd19_incremental",
@@ -82,7 +86,7 @@ PAPER_EXPERIMENTS: tuple[PaperExperiment, ...] = (
     ),
     PaperExperiment(
         name="sd19_ndl_ir",
-        description="SD-19 neurogenesis with dataset-based replay enabled for comparison.",
+        description="SD-19 neurogenesis in ndl_ir regime using dataset replay for stability.",
         overrides=(
             "data=sd19",
             "experiment=sd19_incremental",

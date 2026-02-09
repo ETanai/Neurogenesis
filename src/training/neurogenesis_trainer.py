@@ -97,7 +97,7 @@ class NeurogenesisTrainer:
             return None, False
         remaining = self.replay_old_limit
         mode = self.stability_replay_mode
-        replay_only = mode == "only"
+        replay_only = mode in {"only", "only_balanced"}
         if mode == "ratio_schedule":
             ratio = min(
                 self.stability_replay_ratio_base * max(n_old_classes, 1),
@@ -109,6 +109,8 @@ class NeurogenesisTrainer:
             ratio = self.stability_replay_ratio
 
         ratio = max(float(ratio), 0.0)
+        replay_classes = [int(cls) for cls in self.ir.available_classes()]
+        class_cursor = 0
 
         def _sample(batch_size: int) -> Optional[torch.Tensor]:
             sync_fn = getattr(self.ir, "sync_encoder_latent_dim", None)
@@ -117,7 +119,7 @@ class NeurogenesisTrainer:
                     sync_fn()
                 except Exception:
                     pass
-            nonlocal remaining
+            nonlocal remaining, class_cursor
             take = int(math.ceil(batch_size * ratio))
             if take <= 0:
                 return None
@@ -126,7 +128,39 @@ class NeurogenesisTrainer:
                     return None
                 take = min(take, remaining)
                 remaining -= take
-            replay_flat = self.ir.sample_images(None, take)
+            if mode == "only_balanced" and replay_classes:
+                n_classes = len(replay_classes)
+                counts = [0] * n_classes
+                if take >= n_classes:
+                    base = take // n_classes
+                    rem = take % n_classes
+                    for i in range(n_classes):
+                        counts[i] = base
+                    for i in range(rem):
+                        idx = (class_cursor + i) % n_classes
+                        counts[idx] += 1
+                else:
+                    for i in range(take):
+                        idx = (class_cursor + i) % n_classes
+                        counts[idx] += 1
+
+                chunks: list[torch.Tensor] = []
+                for idx, count in enumerate(counts):
+                    if count <= 0:
+                        continue
+                    cls = replay_classes[idx]
+                    chunk = self.ir.sample_images(cls, count)
+                    chunks.append(chunk)
+
+                if not chunks:
+                    return None
+                replay_flat = torch.cat(chunks, dim=0)
+                if replay_flat.size(0) > 1:
+                    order = torch.randperm(replay_flat.size(0), device=replay_flat.device)
+                    replay_flat = replay_flat.index_select(0, order)
+                class_cursor = (class_cursor + take) % max(n_classes, 1)
+            else:
+                replay_flat = self.ir.sample_images(None, take)
             return replay_flat.to(device, non_blocking=True)
 
         return _sample, replay_only
@@ -439,11 +473,11 @@ class NeurogenesisTrainer:
                 last_loss = mean_loss
 
                 last_loss = 1
-                stability_level = int(len(self.ae.encoder) / 2) - 1
                 phase_es_cfg = self._build_phase_early_stop_cfg(level, phase="stability")
                 hist = self.ae.stability_phase(
                     loader=outliers_loader,
-                    level=stability_level,
+                    # Keep stability updates aligned with the currently growing level.
+                    level=level,
                     lr=self.base_lr,
                     epochs=self.stability_epochs,
                     old_x=replay_sampler,

@@ -1,4 +1,4 @@
-description: "SD-19 neurogenesis with dataset replay and intrinsic replay enabled."
+description: "SD-19 neurogenesis ndl_ir regime using dataset replay for stability."
 repetitions: 1
 seed:
   base: 42
@@ -10,7 +10,7 @@ mlflow:
 
 runs:
   - name: ndl_ir
-    description: "SD-19 neurogenesis with dataset replay + intrinsic replay."
+    description: "SD-19 neurogenesis ndl_ir regime with dataset replay."
     overrides:
       - data=sd19
       - experiment=sd19_incremental

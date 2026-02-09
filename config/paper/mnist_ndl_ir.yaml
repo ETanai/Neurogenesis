@@ -14,5 +14,7 @@ runs:
     overrides:
       - data=mnist
       - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
       - experiment.regime=ndl_ir
       - replay.enabled=true
+      - replay.mode=intrinsic

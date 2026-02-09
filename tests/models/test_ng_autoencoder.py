@@ -228,6 +228,74 @@ def test_stability_phase_with_ir(simple_ae, toy_input):
         assert not torch.allclose(param, orig[name])
 
 
+def test_plasticity_phase_is_level_scoped():
+    ae = NGAutoEncoder(
+        input_dim=4,
+        hidden_sizes=[3, 2],
+        activation="identity",
+        activation_latent="identity",
+        activation_last="identity",
+    )
+    ae.add_new_nodes(0, 1)
+    x = torch.randn(6, 4)
+    loader = DataLoader(TensorDataset(x), batch_size=3)
+
+    lvl0_new_before = ae._encoder_layer(0).weight_plastic.detach().clone()
+    lvl1_old_before = ae._encoder_layer(1).weight_mature.detach().clone()
+
+    ae.plasticity_phase(
+        loader,
+        level=0,
+        epochs=1,
+        lr=1e-2,
+        forward_fn=lambda t: ae.forward_partial(t, 0),
+    )
+
+    lvl0_new_after = ae._encoder_layer(0).weight_plastic.detach()
+    lvl1_old_after = ae._encoder_layer(1).weight_mature.detach()
+
+    # Active plastic block can adapt; unrelated encoder levels must stay frozen.
+    assert not torch.allclose(lvl0_new_before, lvl0_new_after)
+    assert torch.allclose(lvl1_old_before, lvl1_old_after)
+
+
+def test_stability_replay_mode_ratio_vs_only(simple_ae, toy_input):
+    simple_ae.add_new_nodes(0, 1)
+    loader = DataLoader(TensorDataset(toy_input), batch_size=2)
+
+    seen_batch_sizes: list[int] = []
+    orig_forward = simple_ae.forward
+
+    def _record_forward(x):
+        seen_batch_sizes.append(int(x.size(0)))
+        return orig_forward(x)
+
+    simple_ae.forward = _record_forward  # type: ignore[assignment]
+
+    def _replay_sampler(batch_size: int):
+        return torch.zeros(batch_size, simple_ae.input_dim)
+
+    simple_ae.stability_phase(
+        loader,
+        level=0,
+        lr=1e-3,
+        epochs=1,
+        old_x=_replay_sampler,
+        replay_only=False,
+    )
+    assert seen_batch_sizes and all(size == 4 for size in seen_batch_sizes)
+
+    seen_batch_sizes.clear()
+    simple_ae.stability_phase(
+        loader,
+        level=0,
+        lr=1e-3,
+        epochs=1,
+        old_x=_replay_sampler,
+        replay_only=True,
+    )
+    assert seen_batch_sizes and all(size == 2 for size in seen_batch_sizes)
+
 # def test_grid_recon_flat(simple_ae, toy_input):
 #     # no reshaping
 #     out = simple_ae.grid_recon(toy_input)

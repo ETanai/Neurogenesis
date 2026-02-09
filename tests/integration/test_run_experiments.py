@@ -8,6 +8,8 @@ from omegaconf import OmegaConf
 from PIL import Image
 
 from scripts.run_experiments import run
+from utils.dataset_replay import DatasetReplay
+from utils.intrinsic_replay import IntrinsicReplay
 
 
 def make_toy_cfg():
@@ -179,6 +181,20 @@ def test_run_pipeline_with_mnist_smoke(monkeypatch, tmp_path):
     assert trainer._class_count == 1
     assert replay is not None
     assert set(replay.available_classes()) == {0, 1}
+
+
+def test_replay_backend_selection_by_mode():
+    cfg = make_toy_cfg()
+    cfg.experiment["regime"] = "cl_ir"
+    cfg.replay["enabled"] = True
+
+    cfg.replay["mode"] = "intrinsic"
+    result_intrinsic = run(cfg)
+    assert isinstance(result_intrinsic["replay"], IntrinsicReplay)
+
+    cfg.replay["mode"] = "dataset"
+    result_dataset = run(cfg)
+    assert isinstance(result_dataset["replay"], DatasetReplay)
 
 
 def test_mlflow_logging(monkeypatch, tmp_path):

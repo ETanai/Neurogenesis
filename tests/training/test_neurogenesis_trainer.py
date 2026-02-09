@@ -59,9 +59,13 @@ class DummyAE:
         lr,
         epochs,
         old_x=None,
+        replay_only=False,
+        eval_batch=None,
+        early_stop_on_eval=False,
         early_stop_cfg=None,
         forward_fn=None,
         epoch_logger=None,
+        **kwargs,
     ):
         if callable(old_x):
             replay_descr = "callable"
@@ -171,6 +175,93 @@ def test_threshold_goal_config_injection():
     assert cfg["goal"] == pytest.approx(0.25 * 1.2)
     assert "use_threshold_goal" not in cfg
     assert "threshold_goal_factor" not in cfg
+
+
+def test_build_replay_sampler_ratio_vs_only(dummy_loader):
+    ae = DummyAE(hidden_sizes=[2])
+    ir = DummyIR()
+    ir._classes = [0]
+    trainer_ratio = NeurogenesisTrainer(
+        ae,
+        ir,
+        thresholds=[0.1],
+        max_nodes=[1],
+        max_outliers=0.1,
+        stability_replay_mode="ratio",
+        stability_replay_ratio=1.0,
+    )
+    sampler_ratio, replay_only_ratio = trainer_ratio._build_replay_sampler(torch.device("cpu"), n_old_classes=1)
+    assert sampler_ratio is not None
+    assert replay_only_ratio is False
+    assert sampler_ratio(4).shape[0] == 4
+
+    trainer_only = NeurogenesisTrainer(
+        ae,
+        ir,
+        thresholds=[0.1],
+        max_nodes=[1],
+        max_outliers=0.1,
+        stability_replay_mode="only",
+        stability_replay_ratio=1.0,
+    )
+    sampler_only, replay_only_only = trainer_only._build_replay_sampler(torch.device("cpu"), n_old_classes=1)
+    assert sampler_only is not None
+    assert replay_only_only is True
+    assert sampler_only(4).shape[0] == 4
+
+
+def test_stability_phase_targets_active_growth_level(dummy_loader):
+    ae = DummyAE(hidden_sizes=[1, 1])
+    trainer = NeurogenesisTrainer(
+        ae,
+        ir=None,
+        thresholds=[0.5, 0.5],
+        max_nodes=[1, 0],
+        max_outliers=0.5,
+        base_lr=0.1,
+        plasticity_epochs=1,
+        stability_epochs=1,
+        next_layer_epochs=1,
+    )
+
+    trainer.learn_class(class_id=1, loader=dummy_loader)
+
+    # First stability call corresponds to the growth round at level 0.
+    # A prior bug routed this to the deepest level, increasing forgetting.
+    assert ae.stability_calls
+    assert ae.stability_calls[0][0] == 0
+
+
+def test_build_replay_sampler_only_balanced(dummy_loader):
+    class BalancedIR:
+        def available_classes(self):
+            return [1, 7, 9]
+
+        def sample_images(self, cls, replay_size):
+            if cls is None:
+                raise AssertionError("only_balanced must request per-class samples")
+            return torch.full((replay_size, 1), float(cls))
+
+    ae = DummyAE(hidden_sizes=[2])
+    ir = BalancedIR()
+    trainer = NeurogenesisTrainer(
+        ae,
+        ir,
+        thresholds=[0.1],
+        max_nodes=[1],
+        max_outliers=0.1,
+        stability_replay_mode="only_balanced",
+        stability_replay_ratio=1.0,
+    )
+    sampler, replay_only = trainer._build_replay_sampler(torch.device("cpu"), n_old_classes=3)
+    assert sampler is not None
+    assert replay_only is True
+
+    batch = sampler(6)
+    assert batch is not None
+    values = batch.view(-1).tolist()
+    counts = {cls: values.count(float(cls)) for cls in [1, 7, 9]}
+    assert counts == {1: 2, 7: 2, 9: 2}
 
 
 if __name__ == "__main__":

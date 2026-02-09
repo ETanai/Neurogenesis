@@ -332,16 +332,22 @@ class NGAutoEncoder(nn.Module):
         lr_p_d = lr_p_d or lr_p
         lr_m_d = lr_m_d or (lr_p / 100.0)
 
-        # # pick the layer modules
-        # enc = self._encoder_layer(level)
-        # dec = self._decoder_layer(level)
+        # Constrain updates to the active encoder level and the mirrored decoder level.
+        enc = self._encoder_layer(level)
+        dec = self._decoder_layer(level)
 
-        # collect disjoint param lists
-        new_enc = [p for p in self.parameters_plastic_enc()]
-        old_enc = [p for p in self.parameters_mature_enc()]
+        def _params_plastic(layer: nn.Module) -> list[nn.Parameter]:
+            fn = getattr(layer, "parameters_plastic", None)
+            return list(fn()) if callable(fn) else []
 
-        new_dec = [p for p in self.parameters_plastic_dec()]
-        old_dec = [p for p in self.parameters_mature_dec()]
+        def _params_mature(layer: nn.Module) -> list[nn.Parameter]:
+            fn = getattr(layer, "parameters_mature", None)
+            return list(fn()) if callable(fn) else []
+
+        new_enc = _params_plastic(enc)
+        old_enc = _params_mature(enc)
+        new_dec = _params_plastic(dec)
+        old_dec = _params_mature(dec)
 
         # freeze everything first
         for p in self.parameters():
@@ -359,14 +365,22 @@ class NGAutoEncoder(nn.Module):
 
         # build optimizer groups, skip zero-lr groups
         param_groups = []
-        if lr_p != 0:
+        if lr_p != 0 and new_enc:
             param_groups.append({"params": new_enc, "lr": lr_p})
-        if lr_m != 0:
+        if lr_m != 0 and old_enc:
             param_groups.append({"params": old_enc, "lr": lr_m})
         if lr_p_d != 0:
-            param_groups.append({"params": new_dec, "lr": lr_p_d})
+            if new_dec:
+                param_groups.append({"params": new_dec, "lr": lr_p_d})
         if lr_m_d != 0:
-            param_groups.append({"params": old_dec, "lr": lr_m_d})
+            if old_dec:
+                param_groups.append({"params": old_dec, "lr": lr_m_d})
+
+        if not param_groups:
+            raise RuntimeError(
+                f"No optimizer parameter groups were created for level={level}. "
+                "Check neurogenesis growth configuration and active layer indices."
+            )
 
         return AdamW(param_groups)
 

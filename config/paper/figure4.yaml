@@ -21,6 +21,7 @@ runs:
     overrides:
       - data=mnist
       - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
       - experiment.regime=ndl
       - replay.enabled=false
   - name: cl_ir
@@ -30,10 +31,13 @@ runs:
       - experiment=mnist_incremental
       - experiment.regime=cl_ir
       - replay.enabled=true
+      - replay.mode=intrinsic
   - name: ndl_ir
     description: "Neurogenesis with intrinsic replay."
     overrides:
       - data=mnist
       - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
       - experiment.regime=ndl_ir
       - replay.enabled=true
+      - replay.mode=intrinsic

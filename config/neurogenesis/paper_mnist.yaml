@@ -1,0 +1,32 @@
+# Paper-fidelity preset for MNIST debug/replication runs.
+# Keep this separate from exploratory defaults so paper scripts can opt-in explicitly.
+max_nodes: [100, 100, 100, 20]
+max_outlier_fraction: 0.1
+replay_old_limit: null
+
+plasticity_epochs: 500
+stability_epochs: 500
+next_layer_epochs: 500
+
+factor_max_new_nodes: 0.2
+factor_new_nodes: 0.01
+
+# Explicit thresholds for fidelity runs; switch to dynamic thresholds by overriding:
+#   neurogenesis.thresholds=null
+thresholds: [0.092, 0.09, 0.08, 0.07]
+
+early_stop:
+  min_delta: 1.0e-4
+  patience: 2
+  mode: min
+  use_threshold_goal: true
+  threshold_goal_factor: 0.8
+  threshold_goal_factor_plasticity: 0.9
+  threshold_goal_factor_stability: 0.7
+
+# Mix current-class and replayed samples during stability.
+stability_replay_mode: ratio
+stability_replay_ratio: 1.0
+stability_replay_ratio_base: 1.0
+stability_replay_ratio_max: 4.0
+stability_replay_balanced_max_ratio: 4.0

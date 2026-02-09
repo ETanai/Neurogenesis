@@ -1181,9 +1181,40 @@ def _resolve_regime(cfg: DictConfig) -> tuple[bool, bool]:
     return mapping[key]
 
 
+def _validate_runtime_config(cfg: DictConfig) -> None:
+    """Fail fast on config combinations that are known to invalidate paper comparisons."""
+    regime = str(cfg.experiment.get("regime", "")).lower()
+    dataset = str(cfg.data.get("name", cfg.experiment.get("dataset", ""))).lower()
+    replay_mode = str(cfg.replay.get("mode", "intrinsic")).lower()
+    replay_enabled = bool(cfg.replay.get("enabled", True))
+
+    if replay_enabled and replay_mode not in {"intrinsic", "dataset"}:
+        raise ValueError(
+            f"Invalid replay.mode '{replay_mode}'. Expected 'intrinsic' or 'dataset'."
+        )
+
+    paper_run = bool(getattr(cfg, "paper_experiment", "")) or bool(
+        cfg.get("enforce_paper_fidelity", False)
+    )
+
+    # For MNIST paper replication, IR regimes must use intrinsic replay.
+    if (
+        paper_run
+        and dataset == "mnist"
+        and regime.endswith("_ir")
+        and replay_enabled
+        and replay_mode != "intrinsic"
+    ):
+        raise ValueError(
+            "MNIST IR regime requires replay.mode=intrinsic for paper-fidelity runs. "
+            f"Got replay.mode={replay_mode!r}."
+        )
+
+
 def run(cfg: DictConfig) -> None:
     print(OmegaConf.to_yaml(cfg))
     t_run0 = time.perf_counter()
+    _validate_runtime_config(cfg)
     _seed_everything(cfg.seed)
     device = _prep_device(cfg)
 

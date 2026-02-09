@@ -16,3 +16,4 @@ runs:
       - experiment=mnist_incremental
       - experiment.regime=cl_ir
       - replay.enabled=true
+      - replay.mode=intrinsic
