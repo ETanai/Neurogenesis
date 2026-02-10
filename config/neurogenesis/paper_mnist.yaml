@@ -11,9 +11,8 @@ next_layer_epochs: 500
 factor_max_new_nodes: 0.2
 factor_new_nodes: 0.01
 
-# Explicit thresholds for fidelity runs; switch to dynamic thresholds by overriding:
-#   neurogenesis.thresholds=null
-thresholds: [0.092, 0.09, 0.08, 0.07]
+# Use data-driven threshold estimation by default for fidelity debugging.
+thresholds: null
 
 early_stop:
   min_delta: 1.0e-4

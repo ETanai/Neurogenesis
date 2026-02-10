@@ -1076,6 +1076,8 @@ def _pretrain(
         lr=cfg.training.base_lr,
         weight_decay=cfg.training.weight_decay,
         device=str(device),
+        mode=str(cfg.training.get("pretrain_mode", "joint")),
+        stacked_level_epochs=cfg.training.get("stacked_level_epochs", None),
     )
     trainer = AutoencoderPretrainer(model, pre_cfg)
     t0 = time.perf_counter()

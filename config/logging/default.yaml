@@ -4,13 +4,13 @@ mlflow:
   experiment_name: neurogenesis-paper # groups runs for paper replication
   run_name: ${now:%Y%m%d_%H%M%S}      # timestamped run names to avoid collisions
   metric_filter:
-    include_prefixes:                # optional whitelist: only log metrics with these prefixes.
+    include_prefixes:                # compact whitelist for responsive MLflow UI.
       - pretrain/
       - threshold/
       - summary/
       - metrics/
-      - plasticity/
-      - stability/
-      - class_
+      - timing/
+      - classes_learned
+      - global_level_
     exclude_prefixes: []              # optional blacklist evaluated when include_prefixes is null.
-    class_metrics: summary            # full | summary | off
+    class_metrics: off                # full | summary | off

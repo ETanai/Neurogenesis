@@ -19,6 +19,8 @@ class PretrainingConfig:
     lr: float = 1e-3
     weight_decay: float = 0.0
     device: str = "auto"
+    mode: str = "joint"
+    stacked_level_epochs: Optional[int] = None
 
 
 class AutoencoderPretrainer:
@@ -46,6 +48,17 @@ class AutoencoderPretrainer:
         log_fn: Optional[callable] = None,
         epoch_hook: Optional[callable] = None,
     ) -> Dict[str, list[float]]:
+        if self.config.mode == "stacked":
+            return self._fit_stacked(
+                train_loader,
+                val_loader=val_loader,
+                log_fn=log_fn,
+                epoch_hook=epoch_hook,
+            )
+
+        if self.config.mode != "joint":
+            raise ValueError(f"Unknown pretraining mode '{self.config.mode}'.")
+
         history: Dict[str, list[float]] = {"train_loss": []}
         if val_loader is not None:
             history["val_loss"] = []
@@ -98,6 +111,138 @@ class AutoencoderPretrainer:
                     self.update_steps += 1
 
                 # accumulate without synchronizing to CPU each step
+                loss_sum = loss_sum + loss.detach()
+                n_batches += 1
+
+        if n_batches == 0:
+            return 0.0
+        return float((loss_sum / n_batches).item())
+
+    def _fit_stacked(
+        self,
+        train_loader: DataLoader,
+        *,
+        val_loader: Optional[DataLoader] = None,
+        log_fn: Optional[callable] = None,
+        epoch_hook: Optional[callable] = None,
+    ) -> Dict[str, list[float]]:
+        n_levels = len(self.model.hidden_sizes)
+        epochs_per_level = (
+            int(self.config.stacked_level_epochs)
+            if self.config.stacked_level_epochs is not None
+            else int(self.config.epochs)
+        )
+        if epochs_per_level <= 0:
+            raise ValueError("stacked_level_epochs must be >= 1")
+
+        history: Dict[str, list[float]] = {"train_loss": []}
+        if val_loader is not None:
+            history["val_loss"] = []
+
+        global_epoch = 0
+        for level in range(n_levels):
+            self._set_stacked_trainable(level)
+            params = [p for p in self.model.parameters() if p.requires_grad]
+            if not params:
+                raise RuntimeError(f"No trainable parameters found for stacked level {level}")
+            optimizer = torch.optim.Adam(
+                params,
+                lr=self.config.lr,
+                weight_decay=self.config.weight_decay,
+            )
+
+            for epoch in range(epochs_per_level):
+                t0 = time.perf_counter()
+                train_loss = self._run_epoch_partial(
+                    train_loader,
+                    optimizer,
+                    level=level,
+                    training=True,
+                )
+                history["train_loss"].append(train_loss)
+                if log_fn is not None:
+                    log_fn(
+                        {
+                            f"pretrain/stacked/level_{level}/train_loss": train_loss,
+                            "pretrain/train_loss": train_loss,
+                        },
+                        global_epoch,
+                    )
+                    log_fn(
+                        {"timing/pretrain_epoch_sec": time.perf_counter() - t0},
+                        global_epoch,
+                    )
+
+                if val_loader is not None:
+                    t1 = time.perf_counter()
+                    val_loss = self._run_epoch_partial(
+                        val_loader,
+                        optimizer,
+                        level=level,
+                        training=False,
+                    )
+                    history["val_loss"].append(val_loss)
+                    if log_fn is not None:
+                        log_fn(
+                            {
+                                f"pretrain/stacked/level_{level}/val_loss": val_loss,
+                                "pretrain/val_loss": val_loss,
+                            },
+                            global_epoch,
+                        )
+                        log_fn({"timing/val_epoch_sec": time.perf_counter() - t1}, global_epoch)
+
+                if epoch_hook is not None:
+                    try:
+                        epoch_hook(global_epoch)
+                    except Exception:
+                        pass
+                global_epoch += 1
+
+        # Restore standard behavior for downstream training.
+        for p in self.model.parameters():
+            p.requires_grad_(True)
+
+        return history
+
+    def _set_stacked_trainable(self, level: int) -> None:
+        for p in self.model.parameters():
+            p.requires_grad_(False)
+
+        enc = self.model._encoder_layer(level)
+        dec = self.model._decoder_layer(level)
+        for p in enc.parameters():
+            p.requires_grad_(True)
+        for p in dec.parameters():
+            p.requires_grad_(True)
+
+    def _run_epoch_partial(
+        self,
+        loader: DataLoader,
+        optimizer: torch.optim.Optimizer,
+        *,
+        level: int,
+        training: bool,
+    ) -> float:
+        if training:
+            self.model.train()
+        else:
+            self.model.eval()
+
+        loss_sum = torch.zeros((), device=self.device)
+        n_batches = 0
+        with torch.set_grad_enabled(training):
+            for batch in loader:
+                x = batch[0].to(self.device, non_blocking=True)
+                recon = self.model.forward_partial(x, layer_idx=level)
+                loss = F.mse_loss(recon, x.view(x.size(0), -1))
+
+                if training:
+                    optimizer.zero_grad(set_to_none=True)
+                    loss.backward()
+                    optimizer.step()
+                    self.update_steps += 1
+
                 loss_sum = loss_sum + loss.detach()
                 n_batches += 1
 

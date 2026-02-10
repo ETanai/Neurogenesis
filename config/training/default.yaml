@@ -1,5 +1,7 @@
 # Optimization schedule shared across experiments.
 pretrain_epochs: 14        # epochs dedicated to fitting the base classes
+pretrain_mode: joint       # joint|stacked (paper-style layer-wise pretraining)
+stacked_level_epochs: null # if set, overrides per-level epochs when pretrain_mode=stacked
 base_lr: 0.0001             # Adam learning rate
 weight_decay: 0.0          # set >0 to regularize large weights
 device: auto               # torch.device string; auto|cpu|cuda|cuda:0|mps are typical choices.
