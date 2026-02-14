@@ -197,6 +197,18 @@ def test_replay_backend_selection_by_mode():
     assert isinstance(result_dataset["replay"], DatasetReplay)
 
 
+def test_paper_fidelity_rejects_mnist_dataset_replay():
+    cfg = make_toy_cfg()
+    cfg.data.name = "mnist"
+    cfg.experiment.dataset = "mnist"
+    cfg.experiment.regime = "ndl_ir"
+    cfg.replay.enabled = True
+    cfg.replay.mode = "dataset"
+    cfg.enforce_paper_fidelity = True
+    with pytest.raises(ValueError, match="MNIST IR regime requires replay.mode=intrinsic"):
+        run(cfg)
+
+
 def test_mlflow_logging(monkeypatch, tmp_path):
     import scripts.run_experiments as runner
 

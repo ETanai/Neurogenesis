@@ -1,0 +1,150 @@
+repetitions: 1
+set_paper_experiment_tag: false
+
+seed:
+  base: 42
+  strategy: sequential
+
+mlflow:
+  experiment_name: mnist-baseline-optimization
+  tracking_uri: sqlite:////workspace/Neurogenesis/mlflow.db
+  run_name_prefix: baseline_opt
+
+runs:
+  - name: baseline_ref
+    description: "Reference baseline (dataset replay + stacked pretraining)."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+
+  - name: outlier_005
+    description: "Lower max outlier fraction."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - neurogenesis.max_outlier_fraction=0.05
+
+  - name: outlier_008
+    description: "Moderate max outlier fraction."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - neurogenesis.max_outlier_fraction=0.08
+
+  - name: outlier_012
+    description: "Higher max outlier fraction."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - neurogenesis.max_outlier_fraction=0.12
+
+  - name: growth_low
+    description: "Conservative growth factors."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - neurogenesis.factor_new_nodes=0.005
+      - neurogenesis.factor_max_new_nodes=0.10
+
+  - name: growth_high
+    description: "Aggressive growth factors."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - neurogenesis.factor_new_nodes=0.02
+      - neurogenesis.factor_max_new_nodes=0.30
+
+  - name: replay_ratio_15
+    description: "Stability replay ratio 1.5."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=1.5
+
+  - name: replay_ratio_20
+    description: "Stability replay ratio 2.0."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=2.0
+
+  - name: replay_only_balanced
+    description: "Replay-only class-balanced stability batches."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - neurogenesis.stability_replay_mode=only_balanced
+      - neurogenesis.stability_replay_ratio=1.0
+
+  - name: compact_growth_plus_ratio
+    description: "Conservative growth + higher replay ratio."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - neurogenesis.max_outlier_fraction=0.08
+      - neurogenesis.factor_new_nodes=0.005
+      - neurogenesis.factor_max_new_nodes=0.10
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=1.5

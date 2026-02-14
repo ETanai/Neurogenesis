@@ -264,5 +264,50 @@ def test_build_replay_sampler_only_balanced(dummy_loader):
     assert counts == {1: 2, 7: 2, 9: 2}
 
 
+def test_growth_condition_modes():
+    ae = DummyAE(hidden_sizes=[2])
+    trainer_fraction = NeurogenesisTrainer(
+        ae,
+        ir=None,
+        thresholds=[0.1],
+        max_nodes=[1],
+        max_outliers=0.25,
+        max_outliers_mode="fraction",
+    )
+    assert trainer_fraction._growth_condition(n_outliers=3, total_seen=10) is True
+    assert trainer_fraction._growth_condition(n_outliers=2, total_seen=10) is False
+
+    trainer_count = NeurogenesisTrainer(
+        ae,
+        ir=None,
+        thresholds=[0.1],
+        max_nodes=[1],
+        max_outliers=0.25,
+        max_outliers_mode="count",
+        max_outliers_count=2,
+    )
+    assert trainer_count._growth_condition(n_outliers=3, total_seen=10) is True
+    assert trainer_count._growth_condition(n_outliers=2, total_seen=10) is False
+
+
+def test_carry_forward_adds_next_level(dummy_loader):
+    ae = DummyAE(hidden_sizes=[1, 1])
+    trainer = NeurogenesisTrainer(
+        ae,
+        ir=None,
+        thresholds=[0.5, 0.5],
+        max_nodes=[1, 0],
+        max_outliers=0.5,
+        base_lr=0.1,
+        plasticity_epochs=1,
+        stability_epochs=1,
+        next_layer_epochs=1,
+        carry_forward_min_new_nodes=1,
+    )
+    trainer.learn_class(class_id=3, loader=dummy_loader)
+    # Growth at level 0 should force at least one carry-forward add at level 1.
+    assert any(level == 1 and num >= 1 for level, num in ae.added)
+
+
 if __name__ == "__main__":
     pytest.main()

@@ -1,5 +1,6 @@
 description: "MNIST neurogenesis with intrinsic replay (main paper result)."
 repetitions: 1
+enforce_paper_fidelity: true
 seed:
   base: 42
   strategy: sequential
@@ -18,3 +19,5 @@ runs:
       - experiment.regime=ndl_ir
       - replay.enabled=true
       - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.pretrain_denoising.enabled=true

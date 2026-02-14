@@ -8,3 +8,9 @@ device: auto               # torch.device string; auto|cpu|cuda|cuda:0|mps are t
 validate: true             # run validation after each epoch
 incremental_epochs: 5      # epochs spent learning each incremental class batch
 log_pretrain_thresholds: true  # log per-epoch threshold estimates during pretraining
+
+pretrain_denoising:
+  enabled: false           # set true for stacked denoising pretraining
+  noise_type: gaussian     # gaussian|mask
+  noise_std: 0.2           # std for gaussian noise when enabled
+  mask_prob: 0.2           # masking probability when noise_type=mask

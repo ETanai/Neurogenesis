@@ -1,0 +1,77 @@
+description: "Fast proxy sweep to tune MNIST NDL+IR toward better loss/growth tradeoff on CPU."
+repetitions: 1
+enforce_paper_fidelity: true
+
+seed:
+  base: 42
+  strategy: sequential
+
+mlflow:
+  experiment_name: mnist-baseline-optimization-refined-fastproxy
+  tracking_uri: sqlite:////workspace/Neurogenesis/mlflow.db
+  run_name_prefix: baseline_opt_refined_fast
+
+runs:
+  - name: proxy_anchor_growth_high
+    description: "Anchor from prior best reconstruction setting."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - experiment.incremental_classes=[0,2,3,4]
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=30
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.plasticity_epochs=120
+      - neurogenesis.stability_epochs=120
+      - neurogenesis.next_layer_epochs=120
+      - neurogenesis.factor_new_nodes=0.02
+      - neurogenesis.factor_max_new_nodes=0.30
+      - neurogenesis.max_outliers_mode=count
+
+  - name: proxy_high_outlier_009
+    description: "Slightly stricter outlier cap to lift growth while preserving quality."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - experiment.incremental_classes=[0,2,3,4]
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=30
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.plasticity_epochs=120
+      - neurogenesis.stability_epochs=120
+      - neurogenesis.next_layer_epochs=120
+      - neurogenesis.factor_new_nodes=0.02
+      - neurogenesis.factor_max_new_nodes=0.30
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count=540
+
+  - name: proxy_high_outlier_009_ratio_20
+    description: "Outlier cap 0.09 with stronger stability replay."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - experiment.incremental_classes=[0,2,3,4]
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=30
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.plasticity_epochs=120
+      - neurogenesis.stability_epochs=120
+      - neurogenesis.next_layer_epochs=120
+      - neurogenesis.factor_new_nodes=0.02
+      - neurogenesis.factor_max_new_nodes=0.30
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count=540
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=2.0

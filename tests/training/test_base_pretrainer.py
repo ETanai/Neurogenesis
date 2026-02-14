@@ -43,3 +43,23 @@ def test_pretrainer_stacked_mode_runs_per_level_and_logs():
     keys = {k for metrics, _ in logs for k in metrics.keys()}
     assert "pretrain/stacked/level_0/train_loss" in keys
     assert "pretrain/stacked/level_1/train_loss" in keys
+
+
+def test_pretrainer_denoising_corrupts_inputs_only():
+    model = NGAutoEncoder(input_dim=4, hidden_sizes=[3, 2], activation_last="identity")
+    loader = _make_loader()
+    cfg = PretrainingConfig(
+        epochs=1,
+        lr=1e-3,
+        device="cpu",
+        mode="joint",
+        denoising_enabled=True,
+        denoising_noise_type="mask",
+        denoising_mask_prob=1.0,
+    )
+    trainer = AutoencoderPretrainer(model, cfg)
+    x = next(iter(loader))[0]
+    x_corrupt = trainer._corrupt_inputs(x)
+    # Mask noise with p=1.0 should fully zero the input while target remains original in training loop.
+    assert torch.allclose(x_corrupt, torch.zeros_like(x))
+    assert not torch.allclose(x, torch.zeros_like(x))

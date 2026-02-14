@@ -21,6 +21,10 @@ class PretrainingConfig:
     device: str = "auto"
     mode: str = "joint"
     stacked_level_epochs: Optional[int] = None
+    denoising_enabled: bool = False
+    denoising_noise_type: str = "gaussian"
+    denoising_noise_std: float = 0.2
+    denoising_mask_prob: float = 0.2
 
 
 class AutoencoderPretrainer:
@@ -39,6 +43,23 @@ class AutoencoderPretrainer:
             self.model.parameters(), lr=config.lr, weight_decay=config.weight_decay
         )
         self.update_steps = 0
+
+    def _corrupt_inputs(self, x: torch.Tensor) -> torch.Tensor:
+        if not bool(self.config.denoising_enabled):
+            return x
+        noise_type = str(self.config.denoising_noise_type).lower()
+        if noise_type == "gaussian":
+            std = max(float(self.config.denoising_noise_std), 0.0)
+            if std == 0.0:
+                return x
+            return torch.clamp(x + torch.randn_like(x) * std, 0.0, 1.0)
+        if noise_type in {"mask", "dropout"}:
+            p = min(max(float(self.config.denoising_mask_prob), 0.0), 1.0)
+            if p == 0.0:
+                return x
+            keep = (torch.rand_like(x) > p).to(x.dtype)
+            return x * keep
+        raise ValueError(f"Unknown denoising noise type '{self.config.denoising_noise_type}'.")
 
     def fit(
         self,
@@ -100,7 +121,8 @@ class AutoencoderPretrainer:
         with torch.set_grad_enabled(training):
             for batch in loader:
                 x = batch[0].to(self.device, non_blocking=True)
-                out = self.model(x)
+                x_in = self._corrupt_inputs(x) if training else x
+                out = self.model(x_in)
                 recon = out["recon"] if isinstance(out, dict) else out
                 loss = F.mse_loss(recon, x.view(x.size(0), -1))
 
@@ -234,7 +256,8 @@ class AutoencoderPretrainer:
         with torch.set_grad_enabled(training):
             for batch in loader:
                 x = batch[0].to(self.device, non_blocking=True)
-                recon = self.model.forward_partial(x, layer_idx=level)
+                x_in = self._corrupt_inputs(x) if training else x
+                recon = self.model.forward_partial(x_in, layer_idx=level)
                 loss = F.mse_loss(recon, x.view(x.size(0), -1))
 
                 if training:

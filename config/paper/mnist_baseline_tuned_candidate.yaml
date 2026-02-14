@@ -1,0 +1,30 @@
+description: "Single full-fidelity candidate tuned for strong reconstruction with growth closer to baseline."
+repetitions: 1
+enforce_paper_fidelity: true
+
+seed:
+  base: 42
+  strategy: sequential
+
+mlflow:
+  experiment_name: mnist-baseline-tuned-candidate
+  tracking_uri: sqlite:////workspace/Neurogenesis/mlflow.db
+  run_name_prefix: baseline_tuned
+
+runs:
+  - name: growth_high_outlier_0095
+    description: "High-growth factors with a slightly stricter outlier cap to increase neurogenesis while keeping low reconstruction error."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.factor_new_nodes=0.02
+      - neurogenesis.factor_max_new_nodes=0.30
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count=570

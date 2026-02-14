@@ -12,8 +12,8 @@ from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf, open_dict
 
-from scripts.run_experiments import run
-from scripts.plot_paper_results import plot_from_config, plot_figure4_panels
+from run_experiments import run
+from plot_paper_results import plot_from_config, plot_figure4_panels
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _DEFAULT_MLFLOW_DIR = (REPO_ROOT / "mlruns").resolve()
@@ -132,6 +132,18 @@ def run_from_config(config_path: Path) -> None:
             f"at {resolved_tracking_uri}."
         )
     run_prefix = mlflow_cfg.get("run_name_prefix", config_path.stem)
+    set_paper_experiment_tag = bool(data.get("set_paper_experiment_tag", True))
+    # Paper configs should default to strict paper-fidelity behavior unless explicitly disabled.
+    is_paper_config = "config/paper/" in config_path.as_posix()
+    enforce_paper_fidelity_default = is_paper_config
+    enforce_paper_fidelity = bool(
+        data.get("enforce_paper_fidelity", enforce_paper_fidelity_default)
+    )
+    # For paper runs, keep paper_experiment tagging enabled by default for traceability/fidelity checks.
+    if is_paper_config and "set_paper_experiment_tag" not in data:
+        set_paper_experiment_tag = True
+    if is_paper_config and enforce_paper_fidelity:
+        set_paper_experiment_tag = True
     timestamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     experiment_name = f"{experiment_name_base}_{timestamp}" if experiment_name_base else None
     summary_root, figure_path, json_path = _make_summary_paths(config_path, timestamp)
@@ -157,7 +169,11 @@ def run_from_config(config_path: Path) -> None:
             )
             cfg = _compose_cfg(overrides)
             with open_dict(cfg):
-                cfg.paper_experiment = f"{config_path.stem}/{run_name}{rep_suffix}"
+                if set_paper_experiment_tag:
+                    cfg.paper_experiment = f"{config_path.stem}/{run_name}{rep_suffix}"
+                else:
+                    cfg.paper_experiment = ""
+                cfg.enforce_paper_fidelity = enforce_paper_fidelity
                 if experiment_name:
                     cfg.logging.mlflow.experiment_name = experiment_name
                 cfg.logging.mlflow.tracking_uri = resolved_tracking_uri

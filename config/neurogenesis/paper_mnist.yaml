@@ -2,6 +2,8 @@
 # Keep this separate from exploratory defaults so paper scripts can opt-in explicitly.
 max_nodes: [100, 100, 100, 20]
 max_outlier_fraction: 0.1
+max_outliers_mode: count
+max_outliers_count: 100
 replay_old_limit: null
 
 plasticity_epochs: 500
@@ -10,6 +12,10 @@ next_layer_epochs: 500
 
 factor_max_new_nodes: 0.2
 factor_new_nodes: 0.01
+carry_forward_min_new_nodes: 1
+
+plasticity_lr_new_decoder_factor: 1.0
+plasticity_lr_old_decoder_factor: 0.01
 
 # Use data-driven threshold estimation by default for fidelity debugging.
 thresholds: null

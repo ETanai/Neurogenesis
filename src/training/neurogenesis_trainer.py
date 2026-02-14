@@ -24,12 +24,17 @@ class NeurogenesisTrainer:
         thresholds: List[float],
         max_nodes: List[int],
         max_outliers: float,
+        max_outliers_mode: str = "fraction",
+        max_outliers_count: int | None = None,
         base_lr: float = 1e-3,
         plasticity_epochs: int = 5,
         stability_epochs: int = 2,
         next_layer_epochs: int = 1,
         factor_max_new_nodes: float = 0.1,
         factor_new_nodes: float = 0.1,
+        carry_forward_min_new_nodes: int = 0,
+        plasticity_lr_new_decoder_factor: float = 0.01,
+        plasticity_lr_old_decoder_factor: float = 0.01,
         logger: MLFlowLogger = None,
         mean_layer_losses=None,
         early_stop_cfg: dict = None,
@@ -45,10 +50,15 @@ class NeurogenesisTrainer:
         self.thresholds = thresholds
         self.max_nodes = max_nodes
         self.max_outliers = max_outliers
+        self.max_outliers_mode = str(max_outliers_mode or "fraction").lower()
+        self.max_outliers_count = None if max_outliers_count is None else int(max_outliers_count)
         self.base_lr = base_lr
         self.logger = logger
         self.factor_max_new_nodes = factor_max_new_nodes
         self.factor_new_nodes = factor_new_nodes
+        self.carry_forward_min_new_nodes = max(int(carry_forward_min_new_nodes), 0)
+        self.plasticity_lr_new_decoder_factor = float(plasticity_lr_new_decoder_factor)
+        self.plasticity_lr_old_decoder_factor = float(plasticity_lr_old_decoder_factor)
         self.mean_layer_losses = mean_layer_losses
         self.early_stop_cfg = early_stop_cfg
         self.replay_old_limit = None if replay_old_limit is None else int(replay_old_limit)
@@ -59,6 +69,7 @@ class NeurogenesisTrainer:
         self.stability_replay_balanced_max_ratio = float(stability_replay_balanced_max_ratio)
         self._phase_loss_history: dict[tuple[Any, int, int, str], list[float]] = {}
         self._recon_eval_batch: torch.Tensor | None = None
+        self._initial_hidden_sizes = list(self.ae.hidden_sizes)
 
         # counter for how many classes we've learned so far
         self._class_count = 0
@@ -70,6 +81,20 @@ class NeurogenesisTrainer:
 
         # History: class_id -> {'layer_errors': List[List[Tensor]]}
         self.history: dict[Any, dict[str, List[List[Tensor]]]] = {}
+
+    def _growth_condition(self, n_outliers: int, total_seen: int) -> bool:
+        if self.max_outliers_mode == "count":
+            limit = self.max_outliers_count
+            if limit is None:
+                # Backward-compatible fallback when count mode is chosen without explicit count.
+                limit = int(math.ceil(float(self.max_outliers) * max(total_seen, 1)))
+            return n_outliers > max(int(limit), 0)
+        if self.max_outliers_mode != "fraction":
+            raise ValueError(
+                f"Unknown max_outliers_mode '{self.max_outliers_mode}'. Expected 'fraction' or 'count'."
+            )
+        fraction = n_outliers / max(total_seen, 1)
+        return bool(fraction > self.max_outliers)
 
     def _log_outlier_metrics(
         self,
@@ -410,7 +435,7 @@ class NeurogenesisTrainer:
             step_stability = 0
 
             for _ in pbar_growth:
-                if not (fraction > self.max_outliers and added < max_rounds):
+                if not (self._growth_condition(n_outliers, total_seen) and added < max_rounds):
                     break
 
                 num_new = int(math.ceil(self.factor_new_nodes * n_outliers))
@@ -446,6 +471,8 @@ class NeurogenesisTrainer:
                     level=level,
                     epochs=self.plasticity_epochs,
                     lr=self.base_lr,
+                    plasticity_lr_new_decoder_factor=self.plasticity_lr_new_decoder_factor,
+                    plasticity_lr_old_decoder_factor=self.plasticity_lr_old_decoder_factor,
                     early_stop_cfg=phase_es_cfg,
                     forward_fn=lambda x: self.ae.forward_partial(x, level),
                     epoch_logger=epoch_logger,
@@ -475,7 +502,7 @@ class NeurogenesisTrainer:
                 last_loss = 1
                 phase_es_cfg = self._build_phase_early_stop_cfg(level, phase="stability")
                 hist = self.ae.stability_phase(
-                    loader=outliers_loader,
+                    loader=loader,
                     # Keep stability updates aligned with the currently growing level.
                     level=level,
                     lr=self.base_lr,
@@ -555,12 +582,26 @@ class NeurogenesisTrainer:
 
             # Next-layer plasticity & stability
             if level + 1 < num_layers and step_plasticety > 0:
+                if self.carry_forward_min_new_nodes > 0:
+                    next_level = level + 1
+                    nodes_existing = self.ae.encoder[2 * next_level].n_out_features
+                    max_new = int(math.ceil(self.factor_max_new_nodes * nodes_existing))
+                    carry_new = int(min(self.carry_forward_min_new_nodes, max(max_new, 0)))
+                    if carry_new > 0:
+                        self.ae.add_new_nodes(next_level, carry_new)
+                        if self.logger:
+                            self.logger.log_metrics(
+                                {f"class_{class_id}/carry_growth_level_{next_level}": carry_new},
+                                step=self._class_count,
+                            )
                 phase_es_cfg = self._build_phase_early_stop_cfg(level + 1, phase="plasticity")
                 self.ae.plasticity_phase(
                     loader,
                     level + 1,
                     epochs=self.next_layer_epochs,
                     lr=self.base_lr / 100,
+                    plasticity_lr_new_decoder_factor=self.plasticity_lr_new_decoder_factor,
+                    plasticity_lr_old_decoder_factor=self.plasticity_lr_old_decoder_factor,
                     early_stop_cfg=phase_es_cfg,
                 )
                 phase_es_cfg = self._build_phase_early_stop_cfg(level + 1, phase="stability")
@@ -623,8 +664,10 @@ class NeurogenesisTrainer:
         if self.logger and sizes_before:
             summary_metrics = {}
             for idx, (before, after) in enumerate(zip(sizes_before, self.ae.hidden_sizes)):
+                initial = self._initial_hidden_sizes[idx]
                 summary_metrics[f"summary/layer_{idx}_growth_total"] = after - before
                 summary_metrics[f"summary/layer_{idx}_cumulative_size"] = after
+                summary_metrics[f"summary/cumulative_growth/layer_{idx}"] = after - initial
             self.logger.log_metrics(summary_metrics, step=self._class_count)
 
     def test_all_levels(self, loader: DataLoader) -> List[float]:

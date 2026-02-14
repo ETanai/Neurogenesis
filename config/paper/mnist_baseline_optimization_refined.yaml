@@ -1,0 +1,82 @@
+description: "Refined MNIST NDL+IR sweep targeting strong reconstruction with moderate neurogenesis growth."
+repetitions: 1
+enforce_paper_fidelity: true
+
+seed:
+  base: 42
+  strategy: sequential
+
+mlflow:
+  experiment_name: mnist-baseline-optimization-refined
+  tracking_uri: sqlite:////workspace/Neurogenesis/mlflow.db
+  run_name_prefix: baseline_opt_refined
+
+runs:
+  - name: anchor_growth_high
+    description: "Best prior performer from baseline optimization sweep."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.factor_new_nodes=0.02
+      - neurogenesis.factor_max_new_nodes=0.30
+      - neurogenesis.max_outliers_mode=count
+
+  - name: high_growth_outlier_009
+    description: "Slightly stricter outlier cap to increase growth while preserving quality."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.factor_new_nodes=0.02
+      - neurogenesis.factor_max_new_nodes=0.30
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count=540
+
+  - name: high_growth_outlier_009_ratio_20
+    description: "Outlier cap 0.09 plus stronger replay stabilization."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.factor_new_nodes=0.02
+      - neurogenesis.factor_max_new_nodes=0.30
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count=540
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=2.0
+
+  - name: mid_growth_outlier_009
+    description: "Softer growth factors with outlier cap 0.09 for moderate node addition."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.factor_new_nodes=0.015
+      - neurogenesis.factor_max_new_nodes=0.25
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count=540

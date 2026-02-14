@@ -1071,6 +1071,7 @@ def _pretrain(
             shuffle=False,
         )
 
+    denoise_cfg = cfg.training.get("pretrain_denoising", {})
     pre_cfg = PretrainingConfig(
         epochs=cfg.training.pretrain_epochs,
         lr=cfg.training.base_lr,
@@ -1078,6 +1079,10 @@ def _pretrain(
         device=str(device),
         mode=str(cfg.training.get("pretrain_mode", "joint")),
         stacked_level_epochs=cfg.training.get("stacked_level_epochs", None),
+        denoising_enabled=bool(denoise_cfg.get("enabled", False)),
+        denoising_noise_type=str(denoise_cfg.get("noise_type", "gaussian")),
+        denoising_noise_std=float(denoise_cfg.get("noise_std", 0.2)),
+        denoising_mask_prob=float(denoise_cfg.get("mask_prob", 0.2)),
     )
     trainer = AutoencoderPretrainer(model, pre_cfg)
     t0 = time.perf_counter()
@@ -1354,12 +1359,21 @@ def run(cfg: DictConfig) -> None:
             thresholds=thresholds,
             max_nodes=list(cfg.neurogenesis.max_nodes),
             max_outliers=cfg.neurogenesis.max_outlier_fraction,
+            max_outliers_mode=str(cfg.neurogenesis.get("max_outliers_mode", "fraction")),
+            max_outliers_count=cfg.neurogenesis.get("max_outliers_count", None),
             base_lr=cfg.training.base_lr,
             plasticity_epochs=cfg.neurogenesis.plasticity_epochs,
             stability_epochs=cfg.neurogenesis.stability_epochs,
             next_layer_epochs=cfg.neurogenesis.next_layer_epochs,
             factor_max_new_nodes=cfg.neurogenesis.factor_max_new_nodes,
             factor_new_nodes=cfg.neurogenesis.factor_new_nodes,
+            carry_forward_min_new_nodes=int(cfg.neurogenesis.get("carry_forward_min_new_nodes", 0)),
+            plasticity_lr_new_decoder_factor=float(
+                cfg.neurogenesis.get("plasticity_lr_new_decoder_factor", 0.01)
+            ),
+            plasticity_lr_old_decoder_factor=float(
+                cfg.neurogenesis.get("plasticity_lr_old_decoder_factor", 0.01)
+            ),
             logger=logger,
             early_stop_cfg=cfg.neurogenesis.early_stop,
             replay_old_limit=cfg.neurogenesis.get("replay_old_limit", None),
@@ -1431,14 +1445,30 @@ def run(cfg: DictConfig) -> None:
         trainer.log_global_sizes()
         if replay is not None:
             t_boot_inc0 = time.perf_counter()
-            _bootstrap_replay(
-                replay,
-                dm,
-                learned_so_far,
-                batch_size=min(cfg.replay.stats_batch_size, cfg.data.batch_size),
-                num_workers=cfg.data.num_workers,
-                reset_stats=True,
-            )
+            fidelity_mode = bool(cfg.get("enforce_paper_fidelity", False))
+            if (
+                fidelity_mode
+                and replay_mode == "intrinsic"
+                and isinstance(replay, IntrinsicReplay)
+            ):
+                # Paper-fidelity path: refresh only the newly learned class from real data,
+                # preserving prior classes via stored replay statistics.
+                new_cls_loader = _train_loader_for_classes(dm, [class_id], shuffle=False)
+                new_cls_loader = tqdm(
+                    new_cls_loader,
+                    desc=f"Refreshing replay stats for class {class_id}",
+                    leave=False,
+                )
+                replay.fit(new_cls_loader, class_filter=(class_id,))
+            else:
+                _bootstrap_replay(
+                    replay,
+                    dm,
+                    learned_so_far,
+                    batch_size=min(cfg.replay.stats_batch_size, cfg.data.batch_size),
+                    num_workers=cfg.data.num_workers,
+                    reset_stats=True,
+                )
             logger.log_metrics(
                 {"timing/replay_update_sec": time.perf_counter() - t_boot_inc0},
                 step=len(learned_so_far),

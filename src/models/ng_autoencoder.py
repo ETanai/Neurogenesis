@@ -286,19 +286,27 @@ class NGAutoEncoder(nn.Module):
             assert layersizes[i][0] == layersizes[i + 1][1]
         return True
 
-    def _optim_plasticity(self, level: int, lr: float) -> AdamW:
+    def _optim_plasticity(
+        self,
+        level: int,
+        lr: float,
+        *,
+        new_decoder_factor: float = 0.01,
+        old_decoder_factor: float = 0.01,
+    ) -> AdamW:
         """
         Plasticity phase:
         – train only the new (plastic) nodes at full learning rate
         – freeze all mature (old) parameters
         """
-        small_lr = lr / 100.0
+        new_dec_lr = lr * float(new_decoder_factor)
+        old_dec_lr = lr * float(old_decoder_factor)
         return self._optim_lr_config(
             level=level,
             lr_p=lr,  # new encoder nodes
             lr_m=0.0,  # freeze old encoder
-            lr_p_d=small_lr,  # new decoder nodes
-            lr_m_d=small_lr,  # old decoder nodes
+            lr_p_d=new_dec_lr,  # new decoder nodes
+            lr_m_d=old_dec_lr,  # old decoder nodes
         )
 
     def _optim_stability(self, level: int, lr: float) -> AdamW:
@@ -390,11 +398,19 @@ class NGAutoEncoder(nn.Module):
         level: int,
         epochs: int,
         lr: float,
+        *,
+        plasticity_lr_new_decoder_factor: float = 0.01,
+        plasticity_lr_old_decoder_factor: float = 0.01,
         early_stop_cfg: Optional[dict] = None,
         forward_fn: Optional[Callable[[Tensor], Tensor]] = None,
         epoch_logger: Optional[Callable[[int, EpochSummary], None]] = None,
     ):
-        opt = self._optim_plasticity(level, lr)
+        opt = self._optim_plasticity(
+            level,
+            lr,
+            new_decoder_factor=plasticity_lr_new_decoder_factor,
+            old_decoder_factor=plasticity_lr_old_decoder_factor,
+        )
         es = EarlyStopper(**early_stop_cfg) if early_stop_cfg else None
         return self._run_epoch_loop(
             loader,
