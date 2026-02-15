@@ -19,6 +19,7 @@ plasticity_lr_old_decoder_factor: 0.01
 
 # Use data-driven threshold estimation by default for fidelity debugging.
 thresholds: null
+threshold_scale: 1.0
 
 early_stop:
   min_delta: 1.0e-4

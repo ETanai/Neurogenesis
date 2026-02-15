@@ -1,0 +1,507 @@
+description: "MNIST paper-gap closure sweep balancing reconstruction quality and bounded growth."
+repetitions: 1
+enforce_paper_fidelity: false
+set_paper_experiment_tag: false
+
+seed:
+  base: 42
+  strategy: sequential
+
+mlflow:
+  experiment_name: mnist-paperfit-balanced
+  tracking_uri: sqlite:////workspace/Neurogenesis/mlflow.db
+  run_name_prefix: paperfit_bal
+
+runs:
+  # ---------------------------------------------------------------------------
+  # Phase 2: growth dynamics with dataset replay (12-run growth grid)
+  # ---------------------------------------------------------------------------
+  - name: p2_f003_fn003_fm008
+    description: "Dataset replay growth control: outlier_fraction=0.03, factor_new=0.003, factor_max=0.08."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.03
+      - neurogenesis.factor_new_nodes=0.003
+      - neurogenesis.factor_max_new_nodes=0.08
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=1.0
+      - paper_fit.enabled=true
+
+  - name: p2_f003_fn003_fm012
+    description: "Dataset replay growth control: outlier_fraction=0.03, factor_new=0.003, factor_max=0.12."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.03
+      - neurogenesis.factor_new_nodes=0.003
+      - neurogenesis.factor_max_new_nodes=0.12
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=1.0
+      - paper_fit.enabled=true
+
+  - name: p2_f003_fn006_fm008
+    description: "Dataset replay growth control: outlier_fraction=0.03, factor_new=0.006, factor_max=0.08."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.03
+      - neurogenesis.factor_new_nodes=0.006
+      - neurogenesis.factor_max_new_nodes=0.08
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=1.0
+      - paper_fit.enabled=true
+
+  - name: p2_f003_fn006_fm012
+    description: "Dataset replay growth control: outlier_fraction=0.03, factor_new=0.006, factor_max=0.12."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.03
+      - neurogenesis.factor_new_nodes=0.006
+      - neurogenesis.factor_max_new_nodes=0.12
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=1.0
+      - paper_fit.enabled=true
+
+  - name: p2_f005_fn003_fm008
+    description: "Dataset replay growth control: outlier_fraction=0.05, factor_new=0.003, factor_max=0.08."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.05
+      - neurogenesis.factor_new_nodes=0.003
+      - neurogenesis.factor_max_new_nodes=0.08
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=1.0
+      - paper_fit.enabled=true
+
+  - name: p2_f005_fn003_fm012
+    description: "Dataset replay growth control: outlier_fraction=0.05, factor_new=0.003, factor_max=0.12."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.05
+      - neurogenesis.factor_new_nodes=0.003
+      - neurogenesis.factor_max_new_nodes=0.12
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=1.0
+      - paper_fit.enabled=true
+
+  - name: p2_f005_fn006_fm008
+    description: "Dataset replay growth control: outlier_fraction=0.05, factor_new=0.006, factor_max=0.08."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.05
+      - neurogenesis.factor_new_nodes=0.006
+      - neurogenesis.factor_max_new_nodes=0.08
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=1.0
+      - paper_fit.enabled=true
+
+  - name: p2_f005_fn006_fm012
+    description: "Dataset replay growth control: outlier_fraction=0.05, factor_new=0.006, factor_max=0.12."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.05
+      - neurogenesis.factor_new_nodes=0.006
+      - neurogenesis.factor_max_new_nodes=0.12
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=1.0
+      - paper_fit.enabled=true
+
+  - name: p2_f008_fn003_fm008
+    description: "Dataset replay growth control: outlier_fraction=0.08, factor_new=0.003, factor_max=0.08."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.08
+      - neurogenesis.factor_new_nodes=0.003
+      - neurogenesis.factor_max_new_nodes=0.08
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=1.0
+      - paper_fit.enabled=true
+
+  - name: p2_f008_fn003_fm012
+    description: "Dataset replay growth control: outlier_fraction=0.08, factor_new=0.003, factor_max=0.12."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.08
+      - neurogenesis.factor_new_nodes=0.003
+      - neurogenesis.factor_max_new_nodes=0.12
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=1.0
+      - paper_fit.enabled=true
+
+  - name: p2_f008_fn006_fm008
+    description: "Dataset replay growth control: outlier_fraction=0.08, factor_new=0.006, factor_max=0.08."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.08
+      - neurogenesis.factor_new_nodes=0.006
+      - neurogenesis.factor_max_new_nodes=0.08
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=1.0
+      - paper_fit.enabled=true
+
+  - name: p2_f008_fn006_fm012
+    description: "Dataset replay growth control: outlier_fraction=0.08, factor_new=0.006, factor_max=0.12."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.08
+      - neurogenesis.factor_new_nodes=0.006
+      - neurogenesis.factor_max_new_nodes=0.12
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=1.0
+      - paper_fit.enabled=true
+
+  # ---------------------------------------------------------------------------
+  # Phase 3: quality recovery with fixed growth envelope (dataset replay)
+  # ---------------------------------------------------------------------------
+  - name: p3_qrecovery_e50_est_s07
+    description: "Quality recovery: stacked epochs 50, estimated thresholds, stability factor 0.7."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.05
+      - neurogenesis.factor_new_nodes=0.006
+      - neurogenesis.factor_max_new_nodes=0.12
+      - neurogenesis.thresholds=null
+      - neurogenesis.threshold_scale=1.0
+      - neurogenesis.early_stop.threshold_goal_factor_stability=0.7
+      - paper_fit.enabled=true
+
+  - name: p3_qrecovery_e75_est_s07
+    description: "Quality recovery: stacked epochs 75, estimated thresholds, stability factor 0.7."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=75
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.05
+      - neurogenesis.factor_new_nodes=0.006
+      - neurogenesis.factor_max_new_nodes=0.12
+      - neurogenesis.thresholds=null
+      - neurogenesis.threshold_scale=1.0
+      - neurogenesis.early_stop.threshold_goal_factor_stability=0.7
+      - paper_fit.enabled=true
+
+  - name: p3_qrecovery_e50_manualtight_s07
+    description: "Quality recovery: stacked epochs 50, tightened thresholds via scale 0.9, stability factor 0.7."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.05
+      - neurogenesis.factor_new_nodes=0.006
+      - neurogenesis.factor_max_new_nodes=0.12
+      - neurogenesis.thresholds=null
+      - neurogenesis.threshold_scale=0.9
+      - neurogenesis.early_stop.threshold_goal_factor_stability=0.7
+      - paper_fit.enabled=true
+
+  - name: p3_qrecovery_e75_manualtight_s07
+    description: "Quality recovery: stacked epochs 75, tightened thresholds via scale 0.9, stability factor 0.7."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=75
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.05
+      - neurogenesis.factor_new_nodes=0.006
+      - neurogenesis.factor_max_new_nodes=0.12
+      - neurogenesis.thresholds=null
+      - neurogenesis.threshold_scale=0.9
+      - neurogenesis.early_stop.threshold_goal_factor_stability=0.7
+      - paper_fit.enabled=true
+
+  - name: p3_qrecovery_e50_manualtight_s08
+    description: "Quality recovery: stacked epochs 50, tightened thresholds, stronger stability factor 0.8."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.05
+      - neurogenesis.factor_new_nodes=0.006
+      - neurogenesis.factor_max_new_nodes=0.12
+      - neurogenesis.thresholds=null
+      - neurogenesis.threshold_scale=0.9
+      - neurogenesis.early_stop.threshold_goal_factor_stability=0.8
+      - paper_fit.enabled=true
+
+  - name: p3_qrecovery_e75_manualtight_s08
+    description: "Quality recovery: stacked epochs 75, tightened thresholds, stronger stability factor 0.8."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=dataset
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=75
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.05
+      - neurogenesis.factor_new_nodes=0.006
+      - neurogenesis.factor_max_new_nodes=0.12
+      - neurogenesis.thresholds=null
+      - neurogenesis.threshold_scale=0.9
+      - neurogenesis.early_stop.threshold_goal_factor_stability=0.8
+      - paper_fit.enabled=true
+
+  # ---------------------------------------------------------------------------
+  # Phase 4: intrinsic replay re-introduction (4-run replay sweep)
+  # ---------------------------------------------------------------------------
+  - name: p4_ir_low_default
+    description: "Intrinsic replay: lower replay ratio, default covariance smoothing."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - replay.cov_eps=1.0e-4
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=75
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.05
+      - neurogenesis.factor_new_nodes=0.006
+      - neurogenesis.factor_max_new_nodes=0.12
+      - neurogenesis.thresholds=null
+      - neurogenesis.threshold_scale=0.9
+      - neurogenesis.early_stop.threshold_goal_factor_stability=0.8
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=0.8
+      - paper_fit.enabled=true
+
+  - name: p4_ir_medium_default
+    description: "Intrinsic replay: medium replay ratio, default covariance smoothing."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - replay.cov_eps=1.0e-4
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=75
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.05
+      - neurogenesis.factor_new_nodes=0.006
+      - neurogenesis.factor_max_new_nodes=0.12
+      - neurogenesis.thresholds=null
+      - neurogenesis.threshold_scale=0.9
+      - neurogenesis.early_stop.threshold_goal_factor_stability=0.8
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=1.2
+      - paper_fit.enabled=true
+
+  - name: p4_ir_low_smoothed
+    description: "Intrinsic replay: lower replay ratio, increased covariance smoothing."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - replay.cov_eps=3.0e-4
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=75
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.05
+      - neurogenesis.factor_new_nodes=0.006
+      - neurogenesis.factor_max_new_nodes=0.12
+      - neurogenesis.thresholds=null
+      - neurogenesis.threshold_scale=0.9
+      - neurogenesis.early_stop.threshold_goal_factor_stability=0.8
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=0.8
+      - paper_fit.enabled=true
+
+  - name: p4_ir_medium_smoothed
+    description: "Intrinsic replay: medium replay ratio, increased covariance smoothing."
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - replay.cov_eps=3.0e-4
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=75
+      - training.pretrain_denoising.enabled=true
+      - neurogenesis.max_nodes=[50,45,35,20]
+      - neurogenesis.max_outliers_mode=fraction
+      - neurogenesis.max_outlier_fraction=0.05
+      - neurogenesis.factor_new_nodes=0.006
+      - neurogenesis.factor_max_new_nodes=0.12
+      - neurogenesis.thresholds=null
+      - neurogenesis.threshold_scale=0.9
+      - neurogenesis.early_stop.threshold_goal_factor_stability=0.8
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=1.2
+      - paper_fit.enabled=true

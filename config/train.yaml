@@ -5,6 +5,7 @@ defaults:
   - experiment: mnist_incremental   # available experiments live in config/experiment (currently this one).
   - training: default          # only 'default' provided; create config/training/<name>.yaml to override.
   - neurogenesis: default      # same pattern: add files under config/neurogenesis for extra presets.
+  - paper_fit: default         # optional quality-growth scoring contract for paper-gap optimization.
   - replay: default            # 'default' is the shipped IR preset; create config/replay/<name>.yaml for others.
   - logging: default           # 'default' enables MLflow; add config/logging/<name>.yaml for alternatives.
 

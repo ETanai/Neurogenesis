@@ -354,6 +354,84 @@ def _log_eval_records(records: list[dict], logger) -> None:
     csv_path.unlink(missing_ok=True)
 
 
+def _paper_fit_enabled(cfg: DictConfig) -> bool:
+    pf = cfg.get("paper_fit", None) if hasattr(cfg, "get") else None
+    if pf is None:
+        return False
+    return bool(pf.get("enabled", False))
+
+
+def _band_distance(value: float, low: float, high: float, *, normalize: str) -> float:
+    if low > high:
+        low, high = high, low
+    if low <= value <= high:
+        return 0.0
+    delta = low - value if value < low else value - high
+    if normalize == "upper":
+        denom = max(high, 1e-8)
+    else:
+        denom = max(high - low, 1e-8)
+    return float(delta / denom)
+
+
+def _extract_final_val_mean(records: list[dict], layer_idx: int) -> float | None:
+    vals = [r for r in records if int(r.get("layer", -1)) == int(layer_idx)]
+    if not vals:
+        return None
+    latest = max(vals, key=lambda r: int(r.get("step", -1)))
+    return float(latest["mean"])
+
+
+def _compute_paper_fit_metrics(
+    *,
+    cfg: DictConfig,
+    final_val_mean: float,
+    final_sizes: Sequence[int],
+) -> dict[str, float]:
+    pf = cfg.paper_fit
+    q_cfg = pf.quality
+    g_cfg = pf.growth
+    w_cfg = pf.weights
+
+    q_min = float(q_cfg.get("normalize_min", 0.0))
+    q_max = float(q_cfg.get("normalize_max", 1.0))
+    q_denom = max(q_max - q_min, 1e-8)
+    quality_term = (float(final_val_mean) - q_min) / q_denom
+    if bool(q_cfg.get("clamp", True)):
+        quality_term = min(max(quality_term, 0.0), 1.0)
+
+    normalize = str(g_cfg.get("normalize", "band_width")).lower()
+    clamp_per_level = float(g_cfg.get("clamp_per_level", 1.0))
+    target_bands = list(g_cfg.get("target_bands", []))
+    distances: list[float] = []
+    for idx, size in enumerate(final_sizes):
+        if idx >= len(target_bands):
+            break
+        lo, hi = target_bands[idx]
+        d = _band_distance(float(size), float(lo), float(hi), normalize=normalize)
+        d = min(max(d, 0.0), clamp_per_level)
+        distances.append(d)
+
+    if distances:
+        growth_term = float(sum(distances) / len(distances))
+    else:
+        growth_term = 0.0
+
+    quality_w = float(w_cfg.get("quality", 0.6))
+    growth_w = float(w_cfg.get("growth", 0.4))
+    paper_fit_score = quality_w * quality_term + growth_w * growth_term
+
+    metrics: dict[str, float] = {
+        "summary/paper_fit_quality_term": float(quality_term),
+        "summary/growth_distance_total": float(sum(distances)),
+        "summary/growth_distance_mean": float(growth_term),
+        "summary/paper_fit_score": float(paper_fit_score),
+    }
+    for idx, dist in enumerate(distances, start=1):
+        metrics[f"summary/growth_distance_l{idx}"] = float(dist)
+    return metrics
+
+
 def _maybe_make_visual_batch(
     dm, classes: Sequence[int], device: torch.device, *, split: str = "val"
 ):
@@ -1218,6 +1296,31 @@ def _validate_runtime_config(cfg: DictConfig) -> None:
         )
 
 
+def _warn_if_outlier_count_exceeds_class_size(cfg: DictConfig, dm) -> None:
+    mode = str(cfg.neurogenesis.get("max_outliers_mode", "fraction")).lower()
+    if mode != "count":
+        return
+    limit = cfg.neurogenesis.get("max_outliers_count", None)
+    if limit is None:
+        return
+    inc_classes = list(cfg.experiment.get("incremental_classes", []))
+    if not inc_classes:
+        return
+    try:
+        first_subset = _get_class_dataset(dm, int(inc_classes[0]), split="train")
+    except Exception:
+        return
+    n_samples = len(first_subset)
+    if int(limit) > int(n_samples):
+        msg = (
+            "[WARN] neurogenesis.max_outliers_count ({limit}) exceeds first incremental class "
+            "train size ({n}); growth trigger may never fire for count-mode thresholds."
+        )
+        print(
+            msg.format(limit=int(limit), n=int(n_samples))
+        )
+
+
 def run(cfg: DictConfig) -> None:
     print(OmegaConf.to_yaml(cfg))
     t_run0 = time.perf_counter()
@@ -1235,6 +1338,8 @@ def run(cfg: DictConfig) -> None:
     }
 
     dm = _instantiate_datamodule(cfg.data, cfg.model)
+    if str(cfg.experiment.get("regime", "")).lower().startswith("ndl"):
+        _warn_if_outlier_count_exceeds_class_size(cfg, dm)
     view_shape = _infer_view_shape(dm)
     log_cfg = getattr(cfg, "logging", {})
     default_samples = 6
@@ -1305,6 +1410,13 @@ def run(cfg: DictConfig) -> None:
                 shuffle=False,
             )
             thresholds = _collect_thresholds(model, threshold_loader, cfg, logger=logger)
+        threshold_scale = float(cfg.neurogenesis.get("threshold_scale", 1.0))
+        if threshold_scale <= 0:
+            raise ValueError(
+                f"neurogenesis.threshold_scale must be > 0, got {threshold_scale}."
+            )
+        if threshold_scale != 1.0:
+            thresholds = [float(thr) * threshold_scale for thr in thresholds]
 
         if len(thresholds) != len(cfg.model.hidden_sizes):
             raise RuntimeError(
@@ -1522,6 +1634,16 @@ def run(cfg: DictConfig) -> None:
         view_shape=view_shape,
         logger=logger,
     )
+    if _paper_fit_enabled(cfg):
+        layer_idx = int(cfg.paper_fit.quality.get("metric_layer", len(model.hidden_sizes) - 1))
+        final_val = _extract_final_val_mean(eval_records, layer_idx=layer_idx)
+        if final_val is not None:
+            paper_fit_metrics = _compute_paper_fit_metrics(
+                cfg=cfg,
+                final_val_mean=final_val,
+                final_sizes=list(model.hidden_sizes),
+            )
+            logger.log_metrics(paper_fit_metrics, step=len(learned))
     logger.log_metrics({"timing/total_run_sec": time.perf_counter() - t_run0})
     logger.finish()
     return {"model": model, "trainer": trainer, "replay": replay, "training_stats": training_stats}

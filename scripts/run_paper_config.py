@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import random
+import time
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -12,8 +13,12 @@ from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf, open_dict
 
-from run_experiments import run
-from plot_paper_results import plot_from_config, plot_figure4_panels
+try:
+    from scripts.run_experiments import run
+    from scripts.plot_paper_results import plot_from_config, plot_figure4_panels
+except ModuleNotFoundError:  # pragma: no cover - script-style invocation fallback
+    from run_experiments import run
+    from plot_paper_results import plot_from_config, plot_figure4_panels
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _DEFAULT_MLFLOW_DIR = (REPO_ROOT / "mlruns").resolve()
@@ -111,6 +116,80 @@ def _default_tracking_uri() -> str:
     return _DEFAULT_MLFLOW_DIR.as_uri()
 
 
+def _pareto_ranks(points: dict[str, tuple[float, float]]) -> dict[str, int]:
+    """Assign Pareto front rank (1 = best front) for minimization objectives."""
+    if not points:
+        return {}
+
+    remaining = dict(points)
+    ranks: dict[str, int] = {}
+    rank = 1
+
+    def _dominates(a: tuple[float, float], b: tuple[float, float]) -> bool:
+        return (a[0] <= b[0] and a[1] <= b[1]) and (a[0] < b[0] or a[1] < b[1])
+
+    while remaining:
+        frontier: list[str] = []
+        for run_a, point_a in remaining.items():
+            dominated = False
+            for run_b, point_b in remaining.items():
+                if run_a == run_b:
+                    continue
+                if _dominates(point_b, point_a):
+                    dominated = True
+                    break
+            if not dominated:
+                frontier.append(run_a)
+
+        for run_id in frontier:
+            ranks[run_id] = rank
+            remaining.pop(run_id, None)
+        rank += 1
+
+    return ranks
+
+
+def _log_quality_growth_pareto_rank(*, experiment_name: str, tracking_uri: str | None) -> None:
+    if mlflow is None:
+        return
+    try:
+        if tracking_uri:
+            mlflow.set_tracking_uri(tracking_uri)
+        exp = mlflow.get_experiment_by_name(experiment_name)
+        if exp is None:
+            return
+        client = mlflow.tracking.MlflowClient()
+        runs = client.search_runs(
+            experiment_ids=[exp.experiment_id],
+            filter_string="attributes.status = 'FINISHED'",
+            max_results=50000,
+        )
+        points: dict[str, tuple[float, float]] = {}
+        for run_obj in runs:
+            rid = run_obj.info.run_id
+            m = run_obj.data.metrics
+            quality = m.get("summary/paper_fit_quality_term")
+            if quality is None:
+                quality = m.get("metrics/val_mean_level_3")
+            growth = m.get("summary/growth_distance_total")
+            if quality is None or growth is None:
+                continue
+            points[rid] = (float(quality), float(growth))
+
+        ranks = _pareto_ranks(points)
+        now_ms = int(time.time() * 1000)
+        for run_id, pareto_rank in ranks.items():
+            client.log_metric(
+                run_id=run_id,
+                key="summary/quality_growth_pareto_rank",
+                value=float(pareto_rank),
+                timestamp=now_ms,
+                step=0,
+            )
+    except Exception as exc:  # pragma: no cover - best-effort logging
+        print(f"[run_paper_config] Warning: failed to log Pareto ranks: {exc}")
+
+
 def run_from_config(config_path: Path) -> None:
     data = OmegaConf.to_container(OmegaConf.load(config_path), resolve=True)
     if not isinstance(data, dict):
@@ -161,12 +240,14 @@ def run_from_config(config_path: Path) -> None:
                     f"Run '{run_name}' in {config_path} must specify Hydra overrides."
                 )
             mlflow_run_name = f"{run_prefix}_{run_name}{rep_suffix}_{timestamp}"
+            has_seed_override = any(str(item).startswith("seed=") for item in overrides)
             overrides.extend(
                 [
                     f"logging.mlflow.run_name={mlflow_run_name}",
-                    f"seed={seed_value}",
                 ]
             )
+            if not has_seed_override:
+                overrides.append(f"seed={seed_value}")
             cfg = _compose_cfg(overrides)
             with open_dict(cfg):
                 if set_paper_experiment_tag:
@@ -189,6 +270,10 @@ def run_from_config(config_path: Path) -> None:
             run(cfg)
 
     if experiment_name:
+        _log_quality_growth_pareto_rank(
+            experiment_name=experiment_name,
+            tracking_uri=resolved_tracking_uri,
+        )
         print(f"\n=== Generating summary artifacts for experiment '{experiment_name}' ===")
         plot_from_config(
             config_path,

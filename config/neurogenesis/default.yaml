@@ -18,6 +18,7 @@ plasticity_lr_new_decoder_factor: 0.01  # multiplier on base_lr for plasticity n
 plasticity_lr_old_decoder_factor: 0.01  # multiplier on base_lr for plasticity old-decoder params
 
 thresholds: [0.092, 0.09, 0.08, 0.07]  # reconstruction error thresholds per layer
+threshold_scale: 1.0      # multiplier applied to thresholds (manual or estimated)
 early_stop:
   min_delta: 1.0e-4            # minimum reconstruction improvement to keep growing
   patience: 2                  # stop neurogenesis after N non-improving phases

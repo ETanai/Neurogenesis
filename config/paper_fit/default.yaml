@@ -1,0 +1,25 @@
+# Optional quality-growth objective used to compare MNIST paper-reproduction runs.
+enabled: false
+
+quality:
+  metric_layer: 3
+  normalize_min: 0.02
+  normalize_max: 0.08
+  clamp: true
+
+growth:
+  # Paper-inspired target bands for final encoder layer sizes (L1..L4).
+  target_bands:
+    - [220, 250]
+    - [115, 145]
+    - [80, 95]
+    - [30, 45]
+  normalize: band_width      # band_width|upper
+  clamp_per_level: 1.0
+
+weights:
+  quality: 0.6
+  growth: 0.4
+
+pareto:
+  enabled: true
