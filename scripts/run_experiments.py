@@ -264,11 +264,32 @@ def _dataloader(dataset, *, batch_size: int, num_workers: int, shuffle: bool) ->
     )
 
 
-def _train_loader_for_classes(dm, classes: Sequence[int], *, shuffle: bool) -> DataLoader:
+def _train_loader_for_classes(
+    dm,
+    classes: Sequence[int],
+    *,
+    shuffle: bool,
+    batch_mode: str = "minibatch",
+    split: str = "train",
+) -> DataLoader:
     """
     Reuse a datamodule's persistent train loader by updating its sampler indices.
     Falls back to building a fresh loader if sampler mutation is unsupported.
     """
+    mode = str(batch_mode or "minibatch").lower()
+    if mode not in {"minibatch", "full_class"}:
+        raise ValueError(f"Unknown batch mode '{batch_mode}'. Expected 'minibatch' or 'full_class'.")
+
+    # Full-class mode: create a one-off loader that emits all selected samples in one batch.
+    if mode == "full_class":
+        subset = _get_combined_dataset(dm, classes, split=split)
+        return _dataloader(
+            subset,
+            batch_size=max(1, len(subset)),
+            num_workers=0,
+            shuffle=shuffle,
+        )
+
     # Prefer class/combined loaders on the data module (they reuse workers).
     loader = None
     if len(classes) == 1 and hasattr(dm, "get_class_dataloader"):
@@ -295,7 +316,7 @@ def _train_loader_for_classes(dm, classes: Sequence[int], *, shuffle: bool) -> D
             loader = None
 
     # Fallback: build a one-off loader
-    subset = _get_combined_dataset(dm, classes, split="train")
+    subset = _get_combined_dataset(dm, classes, split=split)
     return _dataloader(
         subset,
         batch_size=getattr(dm, "hparams", {}).get("batch_size", 32)
@@ -386,7 +407,9 @@ def _compute_paper_fit_metrics(
     *,
     cfg: DictConfig,
     final_val_mean: float,
+    base_val_mean: float | None = None,
     final_sizes: Sequence[int],
+    growth_deltas: Sequence[Sequence[float]] | None = None,
 ) -> dict[str, float]:
     pf = cfg.paper_fit
     q_cfg = pf.quality
@@ -417,18 +440,235 @@ def _compute_paper_fit_metrics(
     else:
         growth_term = 0.0
 
+    shape_cfg = pf.get("growth_shape", {}) or {}
+    shape_enabled = bool(shape_cfg.get("enabled", False))
+    shape_term = 0.0
+    late_early_ratio = 0.0
+    late_early_ratio_total = 0.0
+    late_early_ratio_per_layer: list[float] = []
+    total_growth = 0.0
+    early_growth = 0.0
+    late_growth = 0.0
+    if shape_enabled and growth_deltas:
+        per_step_growth = [float(sum(step_vals)) for step_vals in growth_deltas]
+        total_growth = float(sum(per_step_growth))
+        early_window = int(shape_cfg.get("early_window", 3))
+        late_window = int(shape_cfg.get("late_window", 3))
+        early_window = max(1, early_window)
+        late_window = max(1, late_window)
+        early_steps = per_step_growth[:early_window]
+        late_steps = per_step_growth[-late_window:]
+        early_growth = float(sum(early_steps))
+        late_growth = float(sum(late_steps))
+        late_early_ratio = late_growth / max(early_growth, 1e-8)
+        late_early_ratio_total = late_early_ratio
+
+        n_layers = len(growth_deltas[0]) if growth_deltas else 0
+        for idx in range(n_layers):
+            early_layer = float(sum(step[idx] for step in growth_deltas[:early_window]))
+            late_layer = float(sum(step[idx] for step in growth_deltas[-late_window:]))
+            late_early_ratio_per_layer.append(late_layer / max(early_layer, 1e-8))
+
+        ratio_target = float(shape_cfg.get("late_early_ratio_target", 0.6))
+        ratio_penalty = max(late_early_ratio_total - ratio_target, 0.0) / max(ratio_target, 1e-8)
+
+        max_total_growth = float(shape_cfg.get("max_total_growth", float("inf")))
+        if math.isfinite(max_total_growth):
+            growth_budget_penalty = max(total_growth - max_total_growth, 0.0) / max(
+                max_total_growth, 1e-8
+            )
+        else:
+            growth_budget_penalty = 0.0
+
+        shape_term = float((ratio_penalty + growth_budget_penalty) / 2.0)
+    elif shape_enabled:
+        total_growth = float(sum(float(v) for v in final_sizes))
+
     quality_w = float(w_cfg.get("quality", 0.6))
     growth_w = float(w_cfg.get("growth", 0.4))
-    paper_fit_score = quality_w * quality_term + growth_w * growth_term
+    shape_w = float(shape_cfg.get("weight", 0.0)) if shape_enabled else 0.0
+    total_w = max(quality_w + growth_w + shape_w, 1e-8)
+    paper_fit_score = (
+        quality_w * quality_term + growth_w * growth_term + shape_w * shape_term
+    ) / total_w
+
+    qfirst_cfg = pf.get("quality_first", {}) or {}
+    qfirst_quality_w = float(qfirst_cfg.get("quality_weight", 0.75))
+    qfirst_growth_w = float(qfirst_cfg.get("growth_weight", 0.15))
+    qfirst_shape_w = float(qfirst_cfg.get("growth_shape_weight", 0.10)) if shape_enabled else 0.0
+    qfirst_total_w = max(qfirst_quality_w + qfirst_growth_w + qfirst_shape_w, 1e-8)
+    paper_fit_score_quality_first = (
+        qfirst_quality_w * quality_term
+        + qfirst_growth_w * growth_term
+        + qfirst_shape_w * shape_term
+    ) / qfirst_total_w
+    quality_floor = float(qfirst_cfg.get("quality_floor", 0.035))
+    quality_floor_penalty = float(qfirst_cfg.get("quality_floor_penalty", 0.2))
+    quality_floor_pass = 1.0 if float(final_val_mean) <= quality_floor else 0.0
+    if quality_floor_pass < 0.5:
+        paper_fit_score_quality_first += quality_floor_penalty
 
     metrics: dict[str, float] = {
         "summary/paper_fit_quality_term": float(quality_term),
         "summary/growth_distance_total": float(sum(distances)),
         "summary/growth_distance_mean": float(growth_term),
+        "summary/growth_shape_term": float(shape_term),
+        "summary/growth_late_early_ratio": float(late_early_ratio),
+        "summary/growth_late_early_ratio_total": float(late_early_ratio_total),
+        "summary/growth_early_total": float(early_growth),
+        "summary/growth_late_total": float(late_growth),
+        "summary/growth_decline_index": float(1.0 - min(1.0, late_early_ratio_total)),
+        "summary/growth_total_size_sum": float(total_growth),
         "summary/paper_fit_score": float(paper_fit_score),
+        "summary/paper_fit_score_quality_first": float(paper_fit_score_quality_first),
+        "summary/quality_floor_pass": float(quality_floor_pass),
     }
+    if base_val_mean is not None:
+        metrics["summary/deep_gain_per_growth"] = float(
+            (float(base_val_mean) - float(final_val_mean)) / max(total_growth, 1e-8)
+        )
     for idx, dist in enumerate(distances, start=1):
         metrics[f"summary/growth_distance_l{idx}"] = float(dist)
+    for idx, ratio in enumerate(late_early_ratio_per_layer, start=1):
+        metrics[f"summary/growth_late_early_ratio_l{idx}"] = float(ratio)
+    return metrics
+
+
+def _derive_auto_outlier_count(first_class_size: int, fraction: float) -> int:
+    if first_class_size <= 0:
+        raise ValueError(f"first_class_size must be > 0, got {first_class_size}.")
+    if not (0.0 < fraction <= 1.0):
+        raise ValueError(f"max_outliers_count_fraction must be in (0, 1], got {fraction}.")
+    return int(math.ceil(float(first_class_size) * float(fraction)))
+
+
+def _resolve_max_outliers_count(cfg: DictConfig, dm) -> int | None:
+    mode = str(cfg.neurogenesis.get("max_outliers_mode", "fraction")).lower()
+    if mode != "count":
+        return None
+    auto_mode = str(cfg.neurogenesis.get("max_outliers_count_auto", "none")).lower()
+    manual_limit = cfg.neurogenesis.get("max_outliers_count", None)
+    if auto_mode == "none":
+        return None if manual_limit is None else int(manual_limit)
+    if auto_mode != "first_class_fraction":
+        raise ValueError(
+            f"Unknown neurogenesis.max_outliers_count_auto '{auto_mode}'. "
+            "Expected 'none' or 'first_class_fraction'."
+        )
+
+    inc_classes = list(cfg.experiment.get("incremental_classes", []))
+    if not inc_classes:
+        return None if manual_limit is None else int(manual_limit)
+    first_subset = _get_class_dataset(dm, int(inc_classes[0]), split="train")
+    first_size = len(first_subset)
+    fraction = float(cfg.neurogenesis.get("max_outliers_count_fraction", 0.85))
+    return _derive_auto_outlier_count(first_size, fraction)
+
+
+def _resolve_max_outliers_count_by_layer(cfg: DictConfig, dm, n_layers: int) -> list[int] | None:
+    mode = str(cfg.neurogenesis.get("max_outliers_mode", "fraction")).lower()
+    if mode != "count":
+        return None
+    explicit = cfg.neurogenesis.get("max_outliers_count_by_layer", None)
+    if explicit is not None:
+        vals = [int(v) for v in list(explicit)]
+        if not vals:
+            return None
+        if len(vals) < n_layers:
+            vals.extend([vals[-1]] * (n_layers - len(vals)))
+        return vals[:n_layers]
+
+    auto_mode = str(cfg.neurogenesis.get("max_outliers_count_auto", "none")).lower()
+    if auto_mode != "first_class_fraction":
+        return None
+    fractions = cfg.neurogenesis.get("max_outliers_count_fraction_by_layer", None)
+    if fractions is None:
+        return None
+
+    inc_classes = list(cfg.experiment.get("incremental_classes", []))
+    if not inc_classes:
+        return None
+    first_subset = _get_class_dataset(dm, int(inc_classes[0]), split="train")
+    first_size = len(first_subset)
+    fracs = [float(v) for v in list(fractions)]
+    if not fracs:
+        return None
+    if len(fracs) < n_layers:
+        fracs.extend([fracs[-1]] * (n_layers - len(fracs)))
+    return [_derive_auto_outlier_count(first_size, fracs[idx]) for idx in range(n_layers)]
+
+
+def _recalibrate_thresholds(
+    *,
+    cfg: DictConfig,
+    model: NGAutoEncoder,
+    dm,
+    classes: Sequence[int],
+    split: str,
+    logger,
+    step: int,
+) -> list[float]:
+    subset = _get_combined_dataset(dm, classes, split=split)
+    loader = _dataloader(
+        subset,
+        batch_size=max(1, len(subset)),
+        num_workers=cfg.data.num_workers,
+        shuffle=False,
+    )
+    thresh_cfg = ThresholdEstimationConfig(
+        percentile=float(cfg.neurogenesis.get("recalibrate_percentile", cfg.experiment.threshold.percentile)),
+        margin=cfg.experiment.threshold.margin,
+        minimum=cfg.experiment.threshold.minimum,
+    )
+    estimator = ThresholdEstimator(model, config=thresh_cfg)
+    values = estimator.estimate(loader)
+    if logger is not None and not isinstance(logger, _NullLogger):
+        logger.log_metrics(
+            {f"threshold/recalibrated_level_{i}": float(v) for i, v in enumerate(values)},
+            step=step,
+        )
+    return [float(v) for v in values]
+
+
+def _compute_paper_eval_metrics(
+    *,
+    cfg: DictConfig,
+    trainer: NeurogenesisTrainer | IncrementalTrainer,
+    dm,
+    classes: Sequence[int],
+    initial_by_class: dict[int, float],
+) -> dict[str, float]:
+    layer_idx = int(cfg.paper_fit.quality.get("metric_layer", len(cfg.model.hidden_sizes) - 1))
+    final_by_class: dict[int, float] = {}
+    for cls in classes:
+        subset = _get_class_dataset(dm, int(cls), split="train")
+        loader = _dataloader(
+            subset,
+            batch_size=max(1, len(subset)),
+            num_workers=cfg.data.num_workers,
+            shuffle=False,
+        )
+        mean_losses, _, _ = trainer.test_all_levels(loader)
+        final_by_class[int(cls)] = float(mean_losses[layer_idx])
+
+    common = [c for c in classes if int(c) in initial_by_class]
+    if not common:
+        return {}
+    init_vals = [float(initial_by_class[int(c)]) for c in common]
+    final_vals = [float(final_by_class[int(c)]) for c in common]
+    deltas = [f - i for f, i in zip(final_vals, init_vals)]
+    better = [1.0 if f <= i else 0.0 for f, i in zip(final_vals, init_vals)]
+
+    metrics: dict[str, float] = {
+        "summary/paper_eval/train_full_l3_initial_seen_mean": float(sum(init_vals) / len(init_vals)),
+        "summary/paper_eval/train_full_l3_final_seen_mean": float(sum(final_vals) / len(final_vals)),
+        "summary/paper_eval/train_full_l3_delta_seen_mean": float(sum(deltas) / len(deltas)),
+        "summary/paper_eval/final_better_than_initial_fraction": float(sum(better) / len(better)),
+    }
+    for cls in common:
+        metrics[f"summary/paper_eval/per_class_l3_delta/{int(cls)}"] = float(
+            final_by_class[int(cls)] - initial_by_class[int(cls)]
+        )
     return metrics
 
 
@@ -1137,14 +1377,22 @@ def _pretrain(
 ) -> AutoencoderPretrainer:
     base_classes = cfg.experiment.base_classes
     train_subset = _get_combined_dataset(dm, base_classes, split="train")
-    train_loader = _train_loader_for_classes(dm, base_classes, shuffle=True)
+    pretrain_batch_mode = str(cfg.training.get("pretrain_batch_mode", "minibatch"))
+    train_loader = _train_loader_for_classes(
+        dm,
+        base_classes,
+        shuffle=True,
+        batch_mode=pretrain_batch_mode,
+        split="train",
+    )
 
     val_loader = None
     if cfg.training.validate:
         val_subset = _get_combined_dataset(dm, base_classes, split="val")
+        val_batch_size = max(1, len(val_subset)) if pretrain_batch_mode == "full_class" else cfg.data.batch_size
         val_loader = _dataloader(
             val_subset,
-            batch_size=cfg.data.batch_size,
+            batch_size=val_batch_size,
             num_workers=cfg.data.num_workers,
             shuffle=False,
         )
@@ -1179,9 +1427,10 @@ def _pretrain(
         )
 
     threshold_subset = _get_combined_dataset(dm, base_classes, split="train")
+    threshold_batch_size = max(1, len(threshold_subset)) if pretrain_batch_mode == "full_class" else cfg.data.batch_size
     threshold_loader = _dataloader(
         threshold_subset,
-        batch_size=cfg.data.batch_size,
+        batch_size=threshold_batch_size,
         num_workers=cfg.data.num_workers,
         shuffle=False,
     )
@@ -1277,6 +1526,16 @@ def _validate_runtime_config(cfg: DictConfig) -> None:
         raise ValueError(
             f"Invalid replay.mode '{replay_mode}'. Expected 'intrinsic' or 'dataset'."
         )
+    pretrain_mode = str(cfg.training.get("pretrain_batch_mode", "minibatch")).lower()
+    incr_mode = str(cfg.training.get("incremental_batch_mode", "minibatch")).lower()
+    if pretrain_mode not in {"minibatch", "full_class"}:
+        raise ValueError(
+            f"Invalid training.pretrain_batch_mode '{pretrain_mode}'. Expected 'minibatch' or 'full_class'."
+        )
+    if incr_mode not in {"minibatch", "full_class"}:
+        raise ValueError(
+            f"Invalid training.incremental_batch_mode '{incr_mode}'. Expected 'minibatch' or 'full_class'."
+        )
 
     paper_run = bool(getattr(cfg, "paper_experiment", "")) or bool(
         cfg.get("enforce_paper_fidelity", False)
@@ -1296,11 +1555,15 @@ def _validate_runtime_config(cfg: DictConfig) -> None:
         )
 
 
-def _warn_if_outlier_count_exceeds_class_size(cfg: DictConfig, dm) -> None:
+def _warn_if_outlier_count_exceeds_class_size(
+    cfg: DictConfig, dm, *, resolved_limit: int | None = None
+) -> None:
     mode = str(cfg.neurogenesis.get("max_outliers_mode", "fraction")).lower()
     if mode != "count":
         return
-    limit = cfg.neurogenesis.get("max_outliers_count", None)
+    limit = resolved_limit
+    if limit is None:
+        limit = cfg.neurogenesis.get("max_outliers_count", None)
     if limit is None:
         return
     inc_classes = list(cfg.experiment.get("incremental_classes", []))
@@ -1329,6 +1592,7 @@ def run(cfg: DictConfig) -> None:
     device = _prep_device(cfg)
 
     _apply_experiment_model_overrides(cfg)
+    incremental_batch_mode = str(cfg.training.get("incremental_batch_mode", "minibatch"))
 
     training_stats = {
         "pretrain_parameter_updates": 0,
@@ -1338,8 +1602,14 @@ def run(cfg: DictConfig) -> None:
     }
 
     dm = _instantiate_datamodule(cfg.data, cfg.model)
+    resolved_max_outliers_count = _resolve_max_outliers_count(cfg, dm)
+    resolved_max_outliers_count_by_layer = _resolve_max_outliers_count_by_layer(
+        cfg, dm, len(cfg.model.hidden_sizes)
+    )
     if str(cfg.experiment.get("regime", "")).lower().startswith("ndl"):
-        _warn_if_outlier_count_exceeds_class_size(cfg, dm)
+        _warn_if_outlier_count_exceeds_class_size(
+            cfg, dm, resolved_limit=resolved_max_outliers_count
+        )
     view_shape = _infer_view_shape(dm)
     log_cfg = getattr(cfg, "logging", {})
     default_samples = 6
@@ -1471,15 +1741,30 @@ def run(cfg: DictConfig) -> None:
             thresholds=thresholds,
             max_nodes=list(cfg.neurogenesis.max_nodes),
             max_outliers=cfg.neurogenesis.max_outlier_fraction,
+            max_growth_rounds=cfg.neurogenesis.get("max_growth_rounds", None),
+            max_nodes_legacy_round_semantics=bool(
+                cfg.neurogenesis.get("max_nodes_legacy_round_semantics", False)
+            ),
             max_outliers_mode=str(cfg.neurogenesis.get("max_outliers_mode", "fraction")),
-            max_outliers_count=cfg.neurogenesis.get("max_outliers_count", None),
+            max_outliers_count=resolved_max_outliers_count,
+            max_outliers_count_by_layer=resolved_max_outliers_count_by_layer,
             base_lr=cfg.training.base_lr,
             plasticity_epochs=cfg.neurogenesis.plasticity_epochs,
             stability_epochs=cfg.neurogenesis.stability_epochs,
             next_layer_epochs=cfg.neurogenesis.next_layer_epochs,
             factor_max_new_nodes=cfg.neurogenesis.factor_max_new_nodes,
             factor_new_nodes=cfg.neurogenesis.factor_new_nodes,
+            factor_max_new_nodes_by_layer=cfg.neurogenesis.get(
+                "factor_max_new_nodes_by_layer", None
+            ),
+            factor_new_nodes_by_layer=cfg.neurogenesis.get("factor_new_nodes_by_layer", None),
             carry_forward_min_new_nodes=int(cfg.neurogenesis.get("carry_forward_min_new_nodes", 0)),
+            carry_forward_requires_outlier_check=bool(
+                cfg.neurogenesis.get("carry_forward_requires_outlier_check", False)
+            ),
+            carry_forward_outlier_fraction_min=float(
+                cfg.neurogenesis.get("carry_forward_outlier_fraction_min", 0.01)
+            ),
             plasticity_lr_new_decoder_factor=float(
                 cfg.neurogenesis.get("plasticity_lr_new_decoder_factor", 0.01)
             ),
@@ -1496,6 +1781,10 @@ def run(cfg: DictConfig) -> None:
             stability_replay_balanced_max_ratio=cfg.neurogenesis.get(
                 "stability_replay_balanced_max_ratio", 4.0
             ),
+            stability_dataset_mode=cfg.neurogenesis.get("stability_dataset_mode", "stochastic_ratio"),
+            stability_old_per_class=cfg.neurogenesis.get("stability_old_per_class", "auto_match_new"),
+            stability_shuffle=bool(cfg.neurogenesis.get("stability_shuffle", True)),
+            deep_cap_hit_dampening=cfg.neurogenesis.get("deep_cap_hit_dampening", None),
         )
     else:
         trainer = IncrementalTrainer(
@@ -1513,9 +1802,23 @@ def run(cfg: DictConfig) -> None:
     all_classes: list[int] = list(cfg.experiment.base_classes) + list(
         cfg.experiment.incremental_classes
     )
+    growth_deltas: list[list[float]] = []
     trainer.log_global_sizes()
     eval_records: list[dict] = []
     eval_records.extend(_evaluate(trainer, dm, learned, cfg, step=len(learned), logger=logger))
+    paper_eval_initial_l3_by_class: dict[int, float] = {}
+    if _paper_fit_enabled(cfg):
+        metric_layer = int(cfg.paper_fit.quality.get("metric_layer", len(model.hidden_sizes) - 1))
+        for cls in all_classes:
+            subset_cls = _get_class_dataset(dm, int(cls), split="train")
+            loader_cls = _dataloader(
+                subset_cls,
+                batch_size=max(1, len(subset_cls)),
+                num_workers=cfg.data.num_workers,
+                shuffle=False,
+            )
+            mean_losses, _, _ = trainer.test_all_levels(loader_cls)
+            paper_eval_initial_l3_by_class[int(cls)] = float(mean_losses[metric_layer])
     base_stage_label = f"Step {len(learned)} (base)"
     _log_reconstruction_artifacts(
         model,
@@ -1541,8 +1844,15 @@ def run(cfg: DictConfig) -> None:
 
     for stage, class_id in enumerate(cfg.experiment.incremental_classes, start=1):
         subset = _get_class_dataset(dm, class_id, split="train")
+        sizes_before_stage = list(model.hidden_sizes)
         t_learn0 = time.perf_counter()
-        loader = _train_loader_for_classes(dm, [class_id], shuffle=True)
+        loader = _train_loader_for_classes(
+            dm,
+            [class_id],
+            shuffle=True,
+            batch_mode=incremental_batch_mode,
+            split="train",
+        )
         if isinstance(trainer, NeurogenesisTrainer):
             eval_sample = _maybe_make_visual_batch(dm, learned, device)
             if eval_sample is not None:
@@ -1552,6 +1862,16 @@ def run(cfg: DictConfig) -> None:
         logger.log_metrics(
             {"timing/learn_class_sec": time.perf_counter() - t_learn0}, step=len(learned) + 1
         )
+        if isinstance(trainer, NeurogenesisTrainer):
+            eff_old = getattr(trainer, "last_stability_effective_old_per_class", None)
+            eff_new = getattr(trainer, "last_stability_effective_new_samples", None)
+            metrics: dict[str, float] = {}
+            if eff_old is not None:
+                metrics["summary/stability_effective_old_per_class"] = float(eff_old)
+            if eff_new is not None:
+                metrics["summary/stability_effective_new_samples"] = float(eff_new)
+            if metrics:
+                logger.log_metrics(metrics, step=len(learned) + 1)
         # recompute replay stats for all learned classes with the updated encoder
         learned_so_far = learned + [class_id]
         trainer.log_global_sizes()
@@ -1565,7 +1885,13 @@ def run(cfg: DictConfig) -> None:
             ):
                 # Paper-fidelity path: refresh only the newly learned class from real data,
                 # preserving prior classes via stored replay statistics.
-                new_cls_loader = _train_loader_for_classes(dm, [class_id], shuffle=False)
+                new_cls_loader = _train_loader_for_classes(
+                    dm,
+                    [class_id],
+                    shuffle=False,
+                    batch_mode=incremental_batch_mode,
+                    split="train",
+                )
                 new_cls_loader = tqdm(
                     new_cls_loader,
                     desc=f"Refreshing replay stats for class {class_id}",
@@ -1585,7 +1911,37 @@ def run(cfg: DictConfig) -> None:
                 {"timing/replay_update_sec": time.perf_counter() - t_boot_inc0},
                 step=len(learned_so_far),
             )
+        sizes_after_stage = list(model.hidden_sizes)
+        growth_deltas.append(
+            [float(a - b) for a, b in zip(sizes_after_stage, sizes_before_stage)]
+        )
         learned.append(class_id)
+        if isinstance(trainer, NeurogenesisTrainer) and bool(
+            cfg.neurogenesis.get("recalibrate_thresholds_each_class", False)
+        ):
+            previous_thresholds = [float(v) for v in list(trainer.thresholds)]
+            src = str(
+                cfg.neurogenesis.get("recalibrate_threshold_source", "learned_classes_train")
+            ).lower()
+            split = "val" if src.endswith("_val") else "train"
+            trainer.thresholds = _recalibrate_thresholds(
+                cfg=cfg,
+                model=model,
+                dm=dm,
+                classes=learned,
+                split=split,
+                logger=logger,
+                step=len(learned),
+            )
+            deltas = {}
+            for idx, (new_thr, old_thr) in enumerate(
+                zip(trainer.thresholds, previous_thresholds, strict=False)
+            ):
+                deltas[f"summary/threshold_level_{idx}_recal_delta"] = float(new_thr) - float(
+                    old_thr
+                )
+            if deltas:
+                logger.log_metrics(deltas, step=len(learned))
         _log_replay_stats(replay, logger, step=len(learned))
         eval_records.extend(_evaluate(trainer, dm, learned, cfg, step=len(learned), logger=logger))
         t_fig0 = time.perf_counter()
@@ -1637,13 +1993,36 @@ def run(cfg: DictConfig) -> None:
     if _paper_fit_enabled(cfg):
         layer_idx = int(cfg.paper_fit.quality.get("metric_layer", len(model.hidden_sizes) - 1))
         final_val = _extract_final_val_mean(eval_records, layer_idx=layer_idx)
+        base_val = None
+        base_step = len(cfg.experiment.base_classes)
+        for record in eval_records:
+            if int(record.get("layer", -1)) == layer_idx and int(record.get("step", -1)) == int(
+                base_step
+            ):
+                base_val = float(record["mean"])
+                break
         if final_val is not None:
             paper_fit_metrics = _compute_paper_fit_metrics(
                 cfg=cfg,
                 final_val_mean=final_val,
+                base_val_mean=base_val,
                 final_sizes=list(model.hidden_sizes),
+                growth_deltas=growth_deltas,
             )
+            if base_val is not None:
+                paper_fit_metrics[f"summary/deep_gain_per_growth_l{layer_idx + 1}"] = (
+                    paper_fit_metrics.get("summary/deep_gain_per_growth", 0.0)
+                )
             logger.log_metrics(paper_fit_metrics, step=len(learned))
+        paper_eval_metrics = _compute_paper_eval_metrics(
+            cfg=cfg,
+            trainer=trainer,
+            dm=dm,
+            classes=all_classes,
+            initial_by_class=paper_eval_initial_l3_by_class,
+        )
+        if paper_eval_metrics:
+            logger.log_metrics(paper_eval_metrics, step=len(learned))
     logger.log_metrics({"timing/total_run_sec": time.perf_counter() - t_run0})
     logger.finish()
     return {"model": model, "trainer": trainer, "replay": replay, "training_stats": training_stats}

@@ -1,9 +1,15 @@
 # Paper-fidelity preset for MNIST debug/replication runs.
 # Keep this separate from exploratory defaults so paper scripts can opt-in explicitly.
 max_nodes: [100, 100, 100, 20]
+max_growth_rounds: 100
+max_nodes_legacy_round_semantics: false
 max_outlier_fraction: 0.1
 max_outliers_mode: count
 max_outliers_count: 100
+max_outliers_count_by_layer: null
+max_outliers_count_auto: none
+max_outliers_count_fraction: 0.85
+max_outliers_count_fraction_by_layer: null
 replay_old_limit: null
 
 plasticity_epochs: 500
@@ -12,7 +18,14 @@ next_layer_epochs: 500
 
 factor_max_new_nodes: 0.2
 factor_new_nodes: 0.01
+factor_max_new_nodes_by_layer: null
+factor_new_nodes_by_layer: null
 carry_forward_min_new_nodes: 1
+carry_forward_requires_outlier_check: true
+carry_forward_outlier_fraction_min: 0.01
+stability_dataset_mode: explicit_balanced
+stability_old_per_class: auto_match_new
+stability_shuffle: true
 
 plasticity_lr_new_decoder_factor: 1.0
 plasticity_lr_old_decoder_factor: 0.01
@@ -20,6 +33,13 @@ plasticity_lr_old_decoder_factor: 0.01
 # Use data-driven threshold estimation by default for fidelity debugging.
 thresholds: null
 threshold_scale: 1.0
+recalibrate_thresholds_each_class: false
+recalibrate_threshold_source: learned_classes_train
+recalibrate_percentile: 0.985
+deep_cap_hit_dampening:
+  enabled: false
+  levels: [2, 3]
+  factor_decay: 0.9
 
 early_stop:
   min_delta: 1.0e-4

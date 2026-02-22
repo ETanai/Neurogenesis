@@ -14,6 +14,7 @@ runs:
     description: "Neurogenesis plus intrinsic replay."
     overrides:
       - data=mnist
+      - model=ng_autoencoder_paper
       - experiment=mnist_incremental
       - neurogenesis=paper_mnist
       - experiment.regime=ndl_ir
@@ -21,3 +22,5 @@ runs:
       - replay.mode=intrinsic
       - training.pretrain_mode=stacked
       - training.pretrain_denoising.enabled=true
+      - training.pretrain_batch_mode=full_class
+      - training.incremental_batch_mode=full_class

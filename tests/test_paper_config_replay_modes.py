@@ -12,6 +12,8 @@ def test_mnist_ir_paper_configs_force_intrinsic_mode():
     suite = _read("scripts/run_paper_experiments.py")
     refined = _read("config/paper/mnist_baseline_optimization_refined.yaml")
     tuned = _read("config/paper/mnist_baseline_tuned_candidate.yaml")
+    fidelity = _read("config/paper/mnist_paperfit_fidelity.yaml")
+    fidelity_quality = _read("config/paper/mnist_paperfit_fidelity_quality.yaml")
 
     assert "replay.mode=intrinsic" in cl_ir
     assert "replay.mode=intrinsic" in ndl_ir
@@ -20,12 +22,18 @@ def test_mnist_ir_paper_configs_force_intrinsic_mode():
     assert '"replay.mode=intrinsic"' in suite
     assert "replay.mode=intrinsic" in refined
     assert "replay.mode=intrinsic" in tuned
+    assert "replay.mode=intrinsic" in fidelity
+    assert "replay.mode=intrinsic" in fidelity_quality
 
 
 def test_paper_configs_enable_fidelity_enforcement():
     ndl_ir = _read("config/paper/mnist_ndl_ir.yaml")
     refined = _read("config/paper/mnist_baseline_optimization_refined.yaml")
     tuned = _read("config/paper/mnist_baseline_tuned_candidate.yaml")
+    fidelity = _read("config/paper/mnist_paperfit_fidelity.yaml")
+    fidelity_quality = _read("config/paper/mnist_paperfit_fidelity_quality.yaml")
     assert "enforce_paper_fidelity: true" in ndl_ir
     assert "enforce_paper_fidelity: true" in refined
     assert "enforce_paper_fidelity: true" in tuned
+    assert "enforce_paper_fidelity: true" in fidelity
+    assert "enforce_paper_fidelity: true" in fidelity_quality

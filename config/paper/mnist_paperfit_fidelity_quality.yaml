@@ -1,0 +1,225 @@
+description: "MNIST strict paper-fidelity policy-validation sweep for deep-quality gap closure."
+repetitions: 1
+enforce_paper_fidelity: true
+
+seed:
+  base: 42
+  strategy: sequential
+
+mlflow:
+  experiment_name: mnist-paperfit-fidelity-quality
+  tracking_uri: sqlite:////workspace/Neurogenesis/mlflow.db
+  run_name_prefix: paperfit_fidq
+
+runs:
+  - name: policy_base
+    description: "Baseline policy: auto outlier 0.20, intrinsic replay ratio=2.5."
+    overrides:
+      - data=mnist
+      - model=ng_autoencoder_paper
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_batch_mode=full_class
+      - training.incremental_batch_mode=full_class
+      - training.pretrain_denoising.enabled=true
+      - training.pretrain_denoising.noise_type=gaussian
+      - training.pretrain_denoising.noise_std=0.08
+      - neurogenesis.max_nodes=[90,90,90,20]
+      - neurogenesis.max_growth_rounds=[25,25,25,10]
+      - neurogenesis.max_nodes_legacy_round_semantics=false
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count_auto=first_class_fraction
+      - neurogenesis.max_outliers_count_fraction=0.20
+      - neurogenesis.factor_new_nodes=0.015
+      - neurogenesis.factor_max_new_nodes=0.22
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=2.5
+      - neurogenesis.threshold_scale=1.0
+      - paper_fit.enabled=true
+      - paper_fit.weights.quality=0.75
+      - paper_fit.weights.growth=0.15
+      - paper_fit.growth_shape.weight=0.10
+
+  - name: policy_l2l3_damped
+    description: "Damp deep-layer additions with per-layer growth factors and outlier fractions."
+    overrides:
+      - data=mnist
+      - model=ng_autoencoder_paper
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_batch_mode=full_class
+      - training.incremental_batch_mode=full_class
+      - training.pretrain_denoising.enabled=true
+      - training.pretrain_denoising.noise_type=gaussian
+      - training.pretrain_denoising.noise_std=0.08
+      - neurogenesis.max_nodes=[90,90,90,20]
+      - neurogenesis.max_growth_rounds=[25,25,25,10]
+      - neurogenesis.max_nodes_legacy_round_semantics=false
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count_auto=first_class_fraction
+      - neurogenesis.max_outliers_count_fraction=0.20
+      - neurogenesis.max_outliers_count_fraction_by_layer=[0.20,0.20,0.24,0.28]
+      - neurogenesis.factor_new_nodes=0.015
+      - neurogenesis.factor_new_nodes_by_layer=[0.015,0.015,0.010,0.008]
+      - neurogenesis.factor_max_new_nodes=0.22
+      - neurogenesis.factor_max_new_nodes_by_layer=[0.22,0.22,0.16,0.12]
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=2.5
+      - neurogenesis.threshold_scale=1.0
+      - paper_fit.enabled=true
+      - paper_fit.weights.quality=0.75
+      - paper_fit.weights.growth=0.15
+      - paper_fit.growth_shape.weight=0.10
+
+  - name: policy_carry_guarded
+    description: "Enable conditional carry-forward; add only when next layer has novelty."
+    overrides:
+      - data=mnist
+      - model=ng_autoencoder_paper
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_batch_mode=full_class
+      - training.incremental_batch_mode=full_class
+      - training.pretrain_denoising.enabled=true
+      - training.pretrain_denoising.noise_type=gaussian
+      - training.pretrain_denoising.noise_std=0.08
+      - neurogenesis.max_nodes=[90,90,90,20]
+      - neurogenesis.max_growth_rounds=[25,25,25,10]
+      - neurogenesis.max_nodes_legacy_round_semantics=false
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count_auto=first_class_fraction
+      - neurogenesis.max_outliers_count_fraction=0.20
+      - neurogenesis.factor_new_nodes=0.015
+      - neurogenesis.factor_max_new_nodes=0.22
+      - neurogenesis.carry_forward_requires_outlier_check=true
+      - neurogenesis.carry_forward_outlier_fraction_min=0.01
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=2.5
+      - neurogenesis.threshold_scale=1.0
+      - paper_fit.enabled=true
+      - paper_fit.weights.quality=0.75
+      - paper_fit.weights.growth=0.15
+      - paper_fit.growth_shape.weight=0.10
+
+  - name: policy_damped_plus_carry_guarded
+    description: "Combine deep-layer damping with conditional carry-forward."
+    overrides:
+      - data=mnist
+      - model=ng_autoencoder_paper
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_batch_mode=full_class
+      - training.incremental_batch_mode=full_class
+      - training.pretrain_denoising.enabled=true
+      - training.pretrain_denoising.noise_type=gaussian
+      - training.pretrain_denoising.noise_std=0.08
+      - neurogenesis.max_nodes=[90,90,90,20]
+      - neurogenesis.max_growth_rounds=[25,25,25,10]
+      - neurogenesis.max_nodes_legacy_round_semantics=false
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count_auto=first_class_fraction
+      - neurogenesis.max_outliers_count_fraction=0.20
+      - neurogenesis.max_outliers_count_fraction_by_layer=[0.20,0.20,0.24,0.28]
+      - neurogenesis.factor_new_nodes=0.015
+      - neurogenesis.factor_new_nodes_by_layer=[0.015,0.015,0.010,0.008]
+      - neurogenesis.factor_max_new_nodes=0.22
+      - neurogenesis.factor_max_new_nodes_by_layer=[0.22,0.22,0.16,0.12]
+      - neurogenesis.carry_forward_requires_outlier_check=true
+      - neurogenesis.carry_forward_outlier_fraction_min=0.01
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=2.5
+      - neurogenesis.threshold_scale=1.0
+      - paper_fit.enabled=true
+      - paper_fit.weights.quality=0.75
+      - paper_fit.weights.growth=0.15
+      - paper_fit.growth_shape.weight=0.10
+
+  - name: policy_nodenoise_damped
+    description: "No-denoise variant with deep-layer damping for shallow/deep tradeoff check."
+    overrides:
+      - data=mnist
+      - model=ng_autoencoder_paper
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_batch_mode=full_class
+      - training.incremental_batch_mode=full_class
+      - training.pretrain_denoising.enabled=false
+      - neurogenesis.max_nodes=[90,90,90,20]
+      - neurogenesis.max_growth_rounds=[25,25,25,10]
+      - neurogenesis.max_nodes_legacy_round_semantics=false
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count_auto=first_class_fraction
+      - neurogenesis.max_outliers_count_fraction=0.20
+      - neurogenesis.max_outliers_count_fraction_by_layer=[0.20,0.20,0.24,0.28]
+      - neurogenesis.factor_new_nodes=0.015
+      - neurogenesis.factor_new_nodes_by_layer=[0.015,0.015,0.010,0.008]
+      - neurogenesis.factor_max_new_nodes=0.22
+      - neurogenesis.factor_max_new_nodes_by_layer=[0.22,0.22,0.16,0.12]
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=2.5
+      - neurogenesis.threshold_scale=1.0
+      - paper_fit.enabled=true
+      - paper_fit.weights.quality=0.75
+      - paper_fit.weights.growth=0.15
+      - paper_fit.growth_shape.weight=0.10
+
+  - name: policy_lownoise_damped
+    description: "Low-noise denoising with deep-layer damping to improve deep representation quality."
+    overrides:
+      - data=mnist
+      - model=ng_autoencoder_paper
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_batch_mode=full_class
+      - training.incremental_batch_mode=full_class
+      - training.pretrain_denoising.enabled=true
+      - training.pretrain_denoising.noise_type=gaussian
+      - training.pretrain_denoising.noise_std=0.02
+      - neurogenesis.max_nodes=[90,90,90,20]
+      - neurogenesis.max_growth_rounds=[25,25,25,10]
+      - neurogenesis.max_nodes_legacy_round_semantics=false
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count_auto=first_class_fraction
+      - neurogenesis.max_outliers_count_fraction=0.20
+      - neurogenesis.max_outliers_count_fraction_by_layer=[0.20,0.20,0.24,0.28]
+      - neurogenesis.factor_new_nodes=0.015
+      - neurogenesis.factor_new_nodes_by_layer=[0.015,0.015,0.010,0.008]
+      - neurogenesis.factor_max_new_nodes=0.22
+      - neurogenesis.factor_max_new_nodes_by_layer=[0.22,0.22,0.16,0.12]
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=2.5
+      - neurogenesis.threshold_scale=1.0
+      - paper_fit.enabled=true
+      - paper_fit.weights.quality=0.75
+      - paper_fit.weights.growth=0.15
+      - paper_fit.growth_shape.weight=0.10

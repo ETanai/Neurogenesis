@@ -1,0 +1,279 @@
+description: "MNIST strict paper-fidelity v2 sweep for protocol-correct deep-quality recovery."
+repetitions: 1
+enforce_paper_fidelity: true
+
+seed:
+  base: 42
+  strategy: sequential
+
+mlflow:
+  experiment_name: mnist-paperfit-fidelity-quality-v2
+  tracking_uri: sqlite:////workspace/Neurogenesis/mlflow.db
+  run_name_prefix: paperfit_fidq_v2
+
+runs:
+  - name: v2_anchor_protocol_only
+    overrides:
+      - data=mnist
+      - model=ng_autoencoder_paper
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_batch_mode=full_class
+      - training.incremental_batch_mode=full_class
+      - training.pretrain_denoising.enabled=true
+      - training.pretrain_denoising.noise_type=gaussian
+      - training.pretrain_denoising.noise_std=0.08
+      - neurogenesis.max_nodes=[90,90,90,20]
+      - neurogenesis.max_growth_rounds=[25,25,25,10]
+      - neurogenesis.max_nodes_legacy_round_semantics=false
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count_auto=first_class_fraction
+      - neurogenesis.max_outliers_count_fraction=0.20
+      - neurogenesis.factor_new_nodes=0.015
+      - neurogenesis.factor_max_new_nodes=0.22
+      - neurogenesis.stability_dataset_mode=explicit_balanced
+      - neurogenesis.stability_old_per_class=auto_match_new
+      - neurogenesis.stability_shuffle=true
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=2.5
+      - paper_fit.enabled=true
+      - paper_fit.weights.quality=0.75
+      - paper_fit.weights.growth=0.15
+      - paper_fit.growth_shape.weight=0.10
+
+  - name: v2_anchor_protocol_plus_thresh_recal
+    overrides:
+      - data=mnist
+      - model=ng_autoencoder_paper
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_batch_mode=full_class
+      - training.incremental_batch_mode=full_class
+      - training.pretrain_denoising.enabled=true
+      - training.pretrain_denoising.noise_type=gaussian
+      - training.pretrain_denoising.noise_std=0.08
+      - neurogenesis.max_nodes=[90,90,90,20]
+      - neurogenesis.max_growth_rounds=[25,25,25,10]
+      - neurogenesis.max_nodes_legacy_round_semantics=false
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count_auto=first_class_fraction
+      - neurogenesis.max_outliers_count_fraction=0.20
+      - neurogenesis.factor_new_nodes=0.015
+      - neurogenesis.factor_max_new_nodes=0.22
+      - neurogenesis.stability_dataset_mode=explicit_balanced
+      - neurogenesis.stability_old_per_class=auto_match_new
+      - neurogenesis.recalibrate_thresholds_each_class=true
+      - neurogenesis.recalibrate_threshold_source=learned_classes_train
+      - neurogenesis.recalibrate_percentile=0.985
+      - neurogenesis.stability_replay_ratio=2.5
+      - paper_fit.enabled=true
+
+  - name: v2_protocol_thresh_carry_guarded
+    overrides:
+      - data=mnist
+      - model=ng_autoencoder_paper
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_batch_mode=full_class
+      - training.incremental_batch_mode=full_class
+      - training.pretrain_denoising.enabled=true
+      - training.pretrain_denoising.noise_type=gaussian
+      - training.pretrain_denoising.noise_std=0.08
+      - neurogenesis.max_nodes=[90,90,90,20]
+      - neurogenesis.max_growth_rounds=[25,25,25,10]
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count_auto=first_class_fraction
+      - neurogenesis.max_outliers_count_fraction=0.20
+      - neurogenesis.factor_new_nodes=0.015
+      - neurogenesis.factor_max_new_nodes=0.22
+      - neurogenesis.stability_dataset_mode=explicit_balanced
+      - neurogenesis.recalibrate_thresholds_each_class=true
+      - neurogenesis.carry_forward_requires_outlier_check=true
+      - neurogenesis.carry_forward_outlier_fraction_min=0.01
+      - neurogenesis.stability_replay_ratio=2.5
+      - paper_fit.enabled=true
+
+  - name: v2_protocol_thresh_carry_guarded_l2l3_damped
+    overrides:
+      - data=mnist
+      - model=ng_autoencoder_paper
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_batch_mode=full_class
+      - training.incremental_batch_mode=full_class
+      - training.pretrain_denoising.enabled=true
+      - training.pretrain_denoising.noise_type=gaussian
+      - training.pretrain_denoising.noise_std=0.08
+      - neurogenesis.max_nodes=[90,90,90,20]
+      - neurogenesis.max_growth_rounds=[25,25,25,10]
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count_auto=first_class_fraction
+      - neurogenesis.max_outliers_count_fraction=0.20
+      - neurogenesis.factor_new_nodes=0.015
+      - neurogenesis.factor_new_nodes_by_layer=[0.015,0.015,0.010,0.008]
+      - neurogenesis.factor_max_new_nodes=0.22
+      - neurogenesis.factor_max_new_nodes_by_layer=[0.22,0.22,0.16,0.12]
+      - neurogenesis.deep_cap_hit_dampening.enabled=true
+      - neurogenesis.deep_cap_hit_dampening.levels=[2,3]
+      - neurogenesis.deep_cap_hit_dampening.factor_decay=0.8
+      - neurogenesis.stability_dataset_mode=explicit_balanced
+      - neurogenesis.recalibrate_thresholds_each_class=true
+      - neurogenesis.carry_forward_requires_outlier_check=true
+      - neurogenesis.stability_replay_ratio=2.5
+      - paper_fit.enabled=true
+
+  - name: v2_protocol_thresh_carry_guarded_l2l3_damped_lownoise002
+    overrides:
+      - data=mnist
+      - model=ng_autoencoder_paper
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_batch_mode=full_class
+      - training.incremental_batch_mode=full_class
+      - training.pretrain_denoising.enabled=true
+      - training.pretrain_denoising.noise_type=gaussian
+      - training.pretrain_denoising.noise_std=0.02
+      - neurogenesis.max_nodes=[90,90,90,20]
+      - neurogenesis.max_growth_rounds=[25,25,25,10]
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count_auto=first_class_fraction
+      - neurogenesis.max_outliers_count_fraction=0.20
+      - neurogenesis.factor_new_nodes=0.015
+      - neurogenesis.factor_new_nodes_by_layer=[0.015,0.015,0.010,0.008]
+      - neurogenesis.factor_max_new_nodes=0.22
+      - neurogenesis.factor_max_new_nodes_by_layer=[0.22,0.22,0.16,0.12]
+      - neurogenesis.deep_cap_hit_dampening.enabled=true
+      - neurogenesis.deep_cap_hit_dampening.levels=[2,3]
+      - neurogenesis.deep_cap_hit_dampening.factor_decay=0.8
+      - neurogenesis.stability_dataset_mode=explicit_balanced
+      - neurogenesis.recalibrate_thresholds_each_class=true
+      - neurogenesis.carry_forward_requires_outlier_check=true
+      - neurogenesis.stability_replay_ratio=2.5
+      - paper_fit.enabled=true
+
+  - name: v2_protocol_thresh_carry_guarded_l2l3_damped_nodenoise
+    overrides:
+      - data=mnist
+      - model=ng_autoencoder_paper
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_batch_mode=full_class
+      - training.incremental_batch_mode=full_class
+      - training.pretrain_denoising.enabled=false
+      - neurogenesis.max_nodes=[90,90,90,20]
+      - neurogenesis.max_growth_rounds=[25,25,25,10]
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count_auto=first_class_fraction
+      - neurogenesis.max_outliers_count_fraction=0.20
+      - neurogenesis.factor_new_nodes=0.015
+      - neurogenesis.factor_new_nodes_by_layer=[0.015,0.015,0.010,0.008]
+      - neurogenesis.factor_max_new_nodes=0.22
+      - neurogenesis.factor_max_new_nodes_by_layer=[0.22,0.22,0.16,0.12]
+      - neurogenesis.deep_cap_hit_dampening.enabled=true
+      - neurogenesis.deep_cap_hit_dampening.levels=[2,3]
+      - neurogenesis.deep_cap_hit_dampening.factor_decay=0.8
+      - neurogenesis.stability_dataset_mode=explicit_balanced
+      - neurogenesis.recalibrate_thresholds_each_class=true
+      - neurogenesis.carry_forward_requires_outlier_check=true
+      - neurogenesis.stability_replay_ratio=2.5
+      - paper_fit.enabled=true
+
+  - name: v2_protocol_thresh_carry_guarded_l2l3_damped_replay_more
+    overrides:
+      - data=mnist
+      - model=ng_autoencoder_paper
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_batch_mode=full_class
+      - training.incremental_batch_mode=full_class
+      - training.pretrain_denoising.enabled=true
+      - training.pretrain_denoising.noise_type=gaussian
+      - training.pretrain_denoising.noise_std=0.08
+      - neurogenesis.max_nodes=[90,90,90,20]
+      - neurogenesis.max_growth_rounds=[25,25,25,10]
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count_auto=first_class_fraction
+      - neurogenesis.max_outliers_count_fraction=0.20
+      - neurogenesis.factor_new_nodes=0.015
+      - neurogenesis.factor_new_nodes_by_layer=[0.015,0.015,0.010,0.008]
+      - neurogenesis.factor_max_new_nodes=0.22
+      - neurogenesis.factor_max_new_nodes_by_layer=[0.22,0.22,0.16,0.12]
+      - neurogenesis.deep_cap_hit_dampening.enabled=true
+      - neurogenesis.deep_cap_hit_dampening.levels=[2,3]
+      - neurogenesis.deep_cap_hit_dampening.factor_decay=0.8
+      - neurogenesis.stability_dataset_mode=explicit_balanced
+      - neurogenesis.stability_old_per_class=900
+      - neurogenesis.recalibrate_thresholds_each_class=true
+      - neurogenesis.carry_forward_requires_outlier_check=true
+      - neurogenesis.stability_replay_ratio=2.5
+      - paper_fit.enabled=true
+
+  - name: v2_protocol_thresh_carry_guarded_l2l3_damped_replay_less
+    overrides:
+      - data=mnist
+      - model=ng_autoencoder_paper
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_batch_mode=full_class
+      - training.incremental_batch_mode=full_class
+      - training.pretrain_denoising.enabled=true
+      - training.pretrain_denoising.noise_type=gaussian
+      - training.pretrain_denoising.noise_std=0.08
+      - neurogenesis.max_nodes=[90,90,90,20]
+      - neurogenesis.max_growth_rounds=[25,25,25,10]
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count_auto=first_class_fraction
+      - neurogenesis.max_outliers_count_fraction=0.20
+      - neurogenesis.factor_new_nodes=0.015
+      - neurogenesis.factor_new_nodes_by_layer=[0.015,0.015,0.010,0.008]
+      - neurogenesis.factor_max_new_nodes=0.22
+      - neurogenesis.factor_max_new_nodes_by_layer=[0.22,0.22,0.16,0.12]
+      - neurogenesis.deep_cap_hit_dampening.enabled=true
+      - neurogenesis.deep_cap_hit_dampening.levels=[2,3]
+      - neurogenesis.deep_cap_hit_dampening.factor_decay=0.8
+      - neurogenesis.stability_dataset_mode=explicit_balanced
+      - neurogenesis.stability_old_per_class=150
+      - neurogenesis.recalibrate_thresholds_each_class=true
+      - neurogenesis.carry_forward_requires_outlier_check=true
+      - neurogenesis.stability_replay_ratio=2.5
+      - paper_fit.enabled=true

@@ -1,0 +1,129 @@
+description: "MNIST strict paper-fidelity sweep (intrinsic replay only) balancing deep reconstruction and growth shape."
+repetitions: 1
+enforce_paper_fidelity: true
+
+seed:
+  base: 42
+  strategy: sequential
+
+mlflow:
+  experiment_name: mnist-paperfit-fidelity
+  tracking_uri: sqlite:////workspace/Neurogenesis/mlflow.db
+  run_name_prefix: paperfit_fid
+
+runs:
+  - name: fid_anchor_ratio20
+    description: "Anchor run close to prior best quality with intrinsic replay and count-mode growth trigger."
+    overrides:
+      - data=mnist
+      - model=ng_autoencoder_paper
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_batch_mode=full_class
+      - training.incremental_batch_mode=full_class
+      - training.pretrain_denoising.enabled=true
+      - training.pretrain_denoising.noise_type=gaussian
+      - training.pretrain_denoising.noise_std=0.15
+      - neurogenesis.max_nodes=[35,25,18,8]
+      - neurogenesis.max_growth_rounds=[10,10,10,6]
+      - neurogenesis.max_nodes_legacy_round_semantics=false
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count=520
+      - neurogenesis.factor_new_nodes=0.008
+      - neurogenesis.factor_max_new_nodes=0.08
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=2.0
+      - neurogenesis.threshold_scale=1.0
+      - paper_fit.enabled=true
+
+  - name: fid_mask_denoise
+    description: "Mask-denoising pretraining to reduce threshold drift while keeping fidelity constraints."
+    overrides:
+      - data=mnist
+      - model=ng_autoencoder_paper
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_batch_mode=full_class
+      - training.incremental_batch_mode=full_class
+      - training.pretrain_denoising.enabled=true
+      - training.pretrain_denoising.noise_type=mask
+      - training.pretrain_denoising.mask_prob=0.12
+      - neurogenesis.max_nodes=[35,25,18,8]
+      - neurogenesis.max_growth_rounds=[10,10,10,6]
+      - neurogenesis.max_nodes_legacy_round_semantics=false
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count=520
+      - neurogenesis.factor_new_nodes=0.008
+      - neurogenesis.factor_max_new_nodes=0.08
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=2.0
+      - neurogenesis.threshold_scale=1.0
+      - paper_fit.enabled=true
+
+  - name: fid_tighter_budget
+    description: "Tighter node budget for stronger late-growth suppression."
+    overrides:
+      - data=mnist
+      - model=ng_autoencoder_paper
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_batch_mode=full_class
+      - training.incremental_batch_mode=full_class
+      - training.pretrain_denoising.enabled=true
+      - training.pretrain_denoising.noise_type=gaussian
+      - training.pretrain_denoising.noise_std=0.15
+      - neurogenesis.max_nodes=[30,22,16,8]
+      - neurogenesis.max_growth_rounds=[8,8,8,6]
+      - neurogenesis.max_nodes_legacy_round_semantics=false
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count=540
+      - neurogenesis.factor_new_nodes=0.007
+      - neurogenesis.factor_max_new_nodes=0.07
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=2.0
+      - neurogenesis.threshold_scale=1.0
+      - paper_fit.enabled=true
+
+  - name: fid_replay_ratio15
+    description: "Moderate replay ratio to test quality-growth stability tradeoff under strict fidelity."
+    overrides:
+      - data=mnist
+      - model=ng_autoencoder_paper
+      - experiment=mnist_incremental
+      - neurogenesis=paper_mnist
+      - experiment.regime=ndl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - training.pretrain_mode=stacked
+      - training.stacked_level_epochs=50
+      - training.pretrain_batch_mode=full_class
+      - training.incremental_batch_mode=full_class
+      - training.pretrain_denoising.enabled=true
+      - training.pretrain_denoising.noise_type=gaussian
+      - training.pretrain_denoising.noise_std=0.15
+      - neurogenesis.max_nodes=[35,25,18,8]
+      - neurogenesis.max_growth_rounds=[10,10,10,6]
+      - neurogenesis.max_nodes_legacy_round_semantics=false
+      - neurogenesis.max_outliers_mode=count
+      - neurogenesis.max_outliers_count=520
+      - neurogenesis.factor_new_nodes=0.008
+      - neurogenesis.factor_max_new_nodes=0.08
+      - neurogenesis.stability_replay_mode=ratio
+      - neurogenesis.stability_replay_ratio=1.5
+      - neurogenesis.threshold_scale=1.0
+      - paper_fit.enabled=true

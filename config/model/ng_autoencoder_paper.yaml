@@ -1,0 +1,9 @@
+# Paper-oriented MNIST autoencoder preset.
+input_dim: 784
+hidden_sizes: [200, 100, 75, 20]
+activation: sigmoid
+activation_params: {}
+activation_latent: sigmoid
+activation_latent_params: {}
+activation_last: sigmoid
+activation_last_params: {}

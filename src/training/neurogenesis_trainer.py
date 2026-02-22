@@ -4,7 +4,7 @@ from typing import Any, Callable, List, Optional
 import torch
 from pytorch_lightning.loggers import MLFlowLogger
 from torch import Tensor
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, Subset, TensorDataset
 from tqdm.auto import tqdm
 
 from models.ng_autoencoder import NGAutoEncoder
@@ -24,15 +24,22 @@ class NeurogenesisTrainer:
         thresholds: List[float],
         max_nodes: List[int],
         max_outliers: float,
+        max_growth_rounds: List[int] | int | None = None,
+        max_nodes_legacy_round_semantics: bool = False,
         max_outliers_mode: str = "fraction",
         max_outliers_count: int | None = None,
+        max_outliers_count_by_layer: List[int] | None = None,
         base_lr: float = 1e-3,
         plasticity_epochs: int = 5,
         stability_epochs: int = 2,
         next_layer_epochs: int = 1,
         factor_max_new_nodes: float = 0.1,
         factor_new_nodes: float = 0.1,
+        factor_max_new_nodes_by_layer: List[float] | None = None,
+        factor_new_nodes_by_layer: List[float] | None = None,
         carry_forward_min_new_nodes: int = 0,
+        carry_forward_requires_outlier_check: bool = False,
+        carry_forward_outlier_fraction_min: float = 0.01,
         plasticity_lr_new_decoder_factor: float = 0.01,
         plasticity_lr_old_decoder_factor: float = 0.01,
         logger: MLFlowLogger = None,
@@ -44,19 +51,42 @@ class NeurogenesisTrainer:
         stability_replay_ratio_base: float = 1.0,
         stability_replay_ratio_max: float = 4.0,
         stability_replay_balanced_max_ratio: float = 4.0,
+        stability_dataset_mode: str = "stochastic_ratio",
+        stability_old_per_class: int | str = "auto_match_new",
+        stability_shuffle: bool = True,
+        deep_cap_hit_dampening: dict | None = None,
     ):
         self.ae = ae
         self.ir = ir
         self.thresholds = thresholds
         self.max_nodes = max_nodes
+        self.max_growth_rounds = max_growth_rounds
+        self.max_nodes_legacy_round_semantics = bool(max_nodes_legacy_round_semantics)
         self.max_outliers = max_outliers
         self.max_outliers_mode = str(max_outliers_mode or "fraction").lower()
         self.max_outliers_count = None if max_outliers_count is None else int(max_outliers_count)
+        self.max_outliers_count_by_layer = (
+            None
+            if max_outliers_count_by_layer is None
+            else [int(v) for v in list(max_outliers_count_by_layer)]
+        )
         self.base_lr = base_lr
         self.logger = logger
         self.factor_max_new_nodes = factor_max_new_nodes
         self.factor_new_nodes = factor_new_nodes
+        self.factor_max_new_nodes_by_layer = (
+            None
+            if factor_max_new_nodes_by_layer is None
+            else [float(v) for v in list(factor_max_new_nodes_by_layer)]
+        )
+        self.factor_new_nodes_by_layer = (
+            None
+            if factor_new_nodes_by_layer is None
+            else [float(v) for v in list(factor_new_nodes_by_layer)]
+        )
         self.carry_forward_min_new_nodes = max(int(carry_forward_min_new_nodes), 0)
+        self.carry_forward_requires_outlier_check = bool(carry_forward_requires_outlier_check)
+        self.carry_forward_outlier_fraction_min = max(float(carry_forward_outlier_fraction_min), 0.0)
         self.plasticity_lr_new_decoder_factor = float(plasticity_lr_new_decoder_factor)
         self.plasticity_lr_old_decoder_factor = float(plasticity_lr_old_decoder_factor)
         self.mean_layer_losses = mean_layer_losses
@@ -67,12 +97,24 @@ class NeurogenesisTrainer:
         self.stability_replay_ratio_base = float(stability_replay_ratio_base)
         self.stability_replay_ratio_max = float(stability_replay_ratio_max)
         self.stability_replay_balanced_max_ratio = float(stability_replay_balanced_max_ratio)
+        self.stability_dataset_mode = str(stability_dataset_mode or "stochastic_ratio").lower()
+        self.stability_old_per_class = stability_old_per_class
+        self.stability_shuffle = bool(stability_shuffle)
+        damp = deep_cap_hit_dampening or {}
+        self.deep_cap_hit_dampening_enabled = bool(damp.get("enabled", False))
+        self.deep_cap_hit_dampening_levels = {
+            int(v) for v in list(damp.get("levels", [])) if isinstance(v, (int, float))
+        }
+        self.deep_cap_hit_dampening_factor_decay = float(damp.get("factor_decay", 1.0))
         self._phase_loss_history: dict[tuple[Any, int, int, str], list[float]] = {}
         self._recon_eval_batch: torch.Tensor | None = None
         self._initial_hidden_sizes = list(self.ae.hidden_sizes)
+        self.last_stability_effective_old_per_class: int | None = None
+        self.last_stability_effective_new_samples: int | None = None
 
         # counter for how many classes we've learned so far
         self._class_count = 0
+        self._cap_hit_cumulative: list[int] = [0 for _ in self.ae.hidden_sizes]
 
         # epoch settings per phase
         self.plasticity_epochs = plasticity_epochs
@@ -82,13 +124,51 @@ class NeurogenesisTrainer:
         # History: class_id -> {'layer_errors': List[List[Tensor]]}
         self.history: dict[Any, dict[str, List[List[Tensor]]]] = {}
 
-    def _growth_condition(self, n_outliers: int, total_seen: int) -> bool:
+    def _growth_round_cap(self, level: int) -> int:
+        if self.max_growth_rounds is None:
+            return max(int(self.max_nodes[level]), 0)
+        if isinstance(self.max_growth_rounds, int):
+            return max(int(self.max_growth_rounds), 0)
+        if level >= len(self.max_growth_rounds):
+            return max(int(self.max_nodes[level]), 0)
+        return max(int(self.max_growth_rounds[level]), 0)
+
+    @staticmethod
+    def _layer_override(
+        values: List[float] | List[int] | None, level: int, fallback: float | int
+    ) -> float | int:
+        if values is None:
+            return fallback
+        if level < 0 or level >= len(values):
+            return fallback
+        return values[level]
+
+    def _factor_new_nodes_for_level(self, level: int) -> float:
+        return float(
+            self._layer_override(self.factor_new_nodes_by_layer, level, self.factor_new_nodes)
+        )
+
+    def _factor_max_new_nodes_for_level(self, level: int) -> float:
+        return float(
+            self._layer_override(
+                self.factor_max_new_nodes_by_layer,
+                level,
+                self.factor_max_new_nodes,
+            )
+        )
+
+    def _max_outliers_count_for_level(self, level: int, total_seen: int) -> int:
+        level_limit = self._layer_override(self.max_outliers_count_by_layer, level, None)
+        if level_limit is not None:
+            return max(int(level_limit), 0)
+        if self.max_outliers_count is not None:
+            return max(int(self.max_outliers_count), 0)
+        return max(int(math.ceil(float(self.max_outliers) * max(total_seen, 1))), 0)
+
+    def _growth_condition(self, n_outliers: int, total_seen: int, level: int) -> bool:
         if self.max_outliers_mode == "count":
-            limit = self.max_outliers_count
-            if limit is None:
-                # Backward-compatible fallback when count mode is chosen without explicit count.
-                limit = int(math.ceil(float(self.max_outliers) * max(total_seen, 1)))
-            return n_outliers > max(int(limit), 0)
+            limit = self._max_outliers_count_for_level(level, total_seen)
+            return n_outliers > limit
         if self.max_outliers_mode != "fraction":
             raise ValueError(
                 f"Unknown max_outliers_mode '{self.max_outliers_mode}'. Expected 'fraction' or 'count'."
@@ -189,6 +269,92 @@ class NeurogenesisTrainer:
             return replay_flat.to(device, non_blocking=True)
 
         return _sample, replay_only
+
+    def _build_explicit_stability_loader(
+        self, loader: DataLoader, *, device: torch.device
+    ) -> DataLoader:
+        self.last_stability_effective_old_per_class = None
+        self.last_stability_effective_new_samples = None
+        if self.ir is None or not self.ir.available_classes():
+            return loader
+        sync_fn = getattr(self.ir, "sync_encoder_latent_dim", None)
+        if callable(sync_fn):
+            try:
+                sync_fn()
+            except Exception:
+                # Keep backward compatibility for replay backends that do not
+                # support latent-dimension synchronization semantics.
+                pass
+        dataset = getattr(loader, "dataset", None)
+        if dataset is None:
+            return loader
+        n_new = len(dataset) if hasattr(dataset, "__len__") else 0
+        if n_new <= 0:
+            return loader
+        per_class_cfg = self.stability_old_per_class
+        old_classes = [int(c) for c in self.ir.available_classes()]
+        if not old_classes:
+            return loader
+        if isinstance(per_class_cfg, str) and per_class_cfg == "auto_match_new":
+            per_class = max(1, int(math.ceil(n_new / max(len(old_classes), 1))))
+        else:
+            per_class = max(int(per_class_cfg), 0)
+        if per_class <= 0:
+            return loader
+        self.last_stability_effective_old_per_class = int(per_class)
+        self.last_stability_effective_new_samples = int(n_new)
+
+        x_replay = []
+        for cls in old_classes:
+            chunk = self.ir.sample_images(cls, per_class).detach().cpu()
+            if chunk.dim() != 2:
+                raise RuntimeError(
+                    f"Intrinsic replay returned tensor with dim={chunk.dim()} for class {cls}; "
+                    "expected flattened shape [batch, features]."
+                )
+            x_replay.append(chunk)
+        if not x_replay:
+            return loader
+        x_replay = torch.cat(x_replay, dim=0)
+
+        # Infer target input shape from current-class samples.
+        sample_batch = next(iter(loader), None)
+        if sample_batch is None:
+            return loader
+        x_shape = tuple(sample_batch[0].shape[1:])
+        expected_features = int(sample_batch[0][0].numel())
+        actual_features = int(x_replay.size(1))
+        if actual_features != expected_features:
+            raise RuntimeError(
+                "Explicit-balanced stability replay shape mismatch: "
+                f"expected flattened feature width {expected_features}, got {actual_features}. "
+                "This usually means replay stats are stale relative to the grown decoder."
+            )
+        if x_shape:
+            x_replay = x_replay.view(x_replay.size(0), *x_shape)
+        y_replay = torch.full((x_replay.size(0),), -1, dtype=torch.long)
+
+        x_new_list: list[torch.Tensor] = []
+        y_new_list: list[torch.Tensor] = []
+        for batch in loader:
+            x_new_list.append(batch[0].detach().cpu())
+            if len(batch) > 1 and torch.is_tensor(batch[1]):
+                y_new_list.append(batch[1].detach().cpu().long())
+            else:
+                y_new_list.append(torch.full((batch[0].size(0),), -1, dtype=torch.long))
+        x_new = torch.cat(x_new_list, dim=0)
+        y_new = torch.cat(y_new_list, dim=0)
+        x_all = torch.cat([x_new, x_replay], dim=0)
+        y_all = torch.cat([y_new, y_replay], dim=0)
+        stable_ds = TensorDataset(x_all, y_all)
+        batch_size = int(loader.batch_size) if loader.batch_size is not None else max(1, len(stable_ds))
+        return DataLoader(
+            stable_ds,
+            batch_size=batch_size,
+            shuffle=self.stability_shuffle,
+            num_workers=loader.num_workers,
+            pin_memory=loader.pin_memory,
+        )
 
     def _build_phase_early_stop_cfg(
         self, level: Optional[int] = None, *, phase: Optional[str] = None
@@ -398,6 +564,7 @@ class NeurogenesisTrainer:
         )
 
         pbar_levels = tqdm(range(num_layers), desc=f"[Class {class_id}] Layers", unit="lvl")
+        level_growth_factor_multiplier: dict[int, float] = {lvl: 1.0 for lvl in range(num_layers)}
         for level in pbar_levels:
             added = 0
             self.ae._plastic_to_mature()
@@ -427,23 +594,55 @@ class NeurogenesisTrainer:
                     step=added,
                 )
             max_rounds = self.max_nodes[level]
+            max_rounds = self._growth_round_cap(level)
             pbar_growth = tqdm(
                 range(max_rounds), desc=f"  Level {level} Growth", unit="rnd", leave=False
             )
+            added_nodes_level = 0
 
             step_plasticety = 0
             step_stability = 0
 
             for _ in pbar_growth:
-                if not (self._growth_condition(n_outliers, total_seen) and added < max_rounds):
+                if self.max_nodes_legacy_round_semantics:
+                    budget_allows = True
+                else:
+                    budget_allows = added_nodes_level < int(self.max_nodes[level])
+
+                if not (self._growth_condition(n_outliers, total_seen, level) and budget_allows):
                     break
 
-                num_new = int(math.ceil(self.factor_new_nodes * n_outliers))
+                effective_factor_new = self._factor_new_nodes_for_level(level) * float(
+                    level_growth_factor_multiplier.get(level, 1.0)
+                )
+                raw_num_new = int(math.ceil(effective_factor_new * n_outliers))
                 nodes_existing = self.ae.encoder[2 * level].n_out_features
-                max_new = int(math.ceil(self.factor_max_new_nodes * nodes_existing))
-                num_new = int(min([num_new, max_new]))
+                max_new = int(
+                    math.ceil(self._factor_max_new_nodes_for_level(level) * nodes_existing)
+                )
+                num_new = int(min([raw_num_new, max_new]))
+                if raw_num_new > max_new:
+                    self._cap_hit_cumulative[level] += 1
+                    if (
+                        self.deep_cap_hit_dampening_enabled
+                        and level in self.deep_cap_hit_dampening_levels
+                        and self.deep_cap_hit_dampening_factor_decay < 1.0
+                    ):
+                        level_growth_factor_multiplier[level] = max(
+                            float(level_growth_factor_multiplier.get(level, 1.0))
+                            * self.deep_cap_hit_dampening_factor_decay,
+                            0.0,
+                        )
+                if not self.max_nodes_legacy_round_semantics:
+                    remaining_budget = int(self.max_nodes[level]) - added_nodes_level
+                    if remaining_budget <= 0:
+                        break
+                    num_new = int(min(num_new, remaining_budget))
+                if num_new <= 0:
+                    break
 
                 self.ae.add_new_nodes(level, num_new)
+                added_nodes_level += num_new
                 n_plastic_neurons += num_new
                 if self.logger:
                     self.logger.log_metrics(
@@ -501,14 +700,21 @@ class NeurogenesisTrainer:
 
                 last_loss = 1
                 phase_es_cfg = self._build_phase_early_stop_cfg(level, phase="stability")
+                stability_loader = loader
+                stability_old_x = replay_sampler
+                stability_replay_only = replay_only
+                if self.stability_dataset_mode == "explicit_balanced":
+                    stability_loader = self._build_explicit_stability_loader(loader, device=device)
+                    stability_old_x = None
+                    stability_replay_only = False
                 hist = self.ae.stability_phase(
-                    loader=loader,
+                    loader=stability_loader,
                     # Keep stability updates aligned with the currently growing level.
                     level=level,
                     lr=self.base_lr,
                     epochs=self.stability_epochs,
-                    old_x=replay_sampler,
-                    replay_only=replay_only,
+                    old_x=stability_old_x,
+                    replay_only=stability_replay_only,
                     eval_batch=self._recon_eval_batch,
                     early_stop_on_eval=self._recon_eval_batch is not None,
                     early_stop_cfg=phase_es_cfg,
@@ -584,16 +790,36 @@ class NeurogenesisTrainer:
             if level + 1 < num_layers and step_plasticety > 0:
                 if self.carry_forward_min_new_nodes > 0:
                     next_level = level + 1
-                    nodes_existing = self.ae.encoder[2 * next_level].n_out_features
-                    max_new = int(math.ceil(self.factor_max_new_nodes * nodes_existing))
-                    carry_new = int(min(self.carry_forward_min_new_nodes, max(max_new, 0)))
-                    if carry_new > 0:
-                        self.ae.add_new_nodes(next_level, carry_new)
+                    allow_carry = True
+                    if self.carry_forward_requires_outlier_check:
+                        next_outliers, _, next_total = self._get_outliers(loader, next_level)
+                        next_fraction = next_outliers / max(next_total, 1)
+                        allow_carry = next_fraction >= self.carry_forward_outlier_fraction_min
                         if self.logger:
                             self.logger.log_metrics(
-                                {f"class_{class_id}/carry_growth_level_{next_level}": carry_new},
+                                {
+                                    f"class_{class_id}/carry_growth_level_{next_level}_novelty_fraction": next_fraction,
+                                    f"class_{class_id}/carry_growth_level_{next_level}_eligible": float(
+                                        allow_carry
+                                    ),
+                                },
                                 step=self._class_count,
                             )
+                    if allow_carry:
+                        nodes_existing = self.ae.encoder[2 * next_level].n_out_features
+                        max_new = int(
+                            math.ceil(
+                                self._factor_max_new_nodes_for_level(next_level) * nodes_existing
+                            )
+                        )
+                        carry_new = int(min(self.carry_forward_min_new_nodes, max(max_new, 0)))
+                        if carry_new > 0:
+                            self.ae.add_new_nodes(next_level, carry_new)
+                            if self.logger:
+                                self.logger.log_metrics(
+                                    {f"class_{class_id}/carry_growth_level_{next_level}": carry_new},
+                                    step=self._class_count,
+                                )
                 phase_es_cfg = self._build_phase_early_stop_cfg(level + 1, phase="plasticity")
                 self.ae.plasticity_phase(
                     loader,
@@ -606,12 +832,14 @@ class NeurogenesisTrainer:
                 )
                 phase_es_cfg = self._build_phase_early_stop_cfg(level + 1, phase="stability")
                 self.ae.stability_phase(
-                    loader,
+                    self._build_explicit_stability_loader(loader, device=device)
+                    if self.stability_dataset_mode == "explicit_balanced"
+                    else loader,
                     level + 1,
                     lr=self.base_lr / 100,
                     epochs=self.stability_epochs,
-                    old_x=replay_sampler,
-                    replay_only=replay_only,
+                    old_x=None if self.stability_dataset_mode == "explicit_balanced" else replay_sampler,
+                    replay_only=False if self.stability_dataset_mode == "explicit_balanced" else replay_only,
                     eval_batch=self._recon_eval_batch,
                     early_stop_on_eval=self._recon_eval_batch is not None,
                     early_stop_cfg=phase_es_cfg,
@@ -668,6 +896,9 @@ class NeurogenesisTrainer:
                 summary_metrics[f"summary/layer_{idx}_growth_total"] = after - before
                 summary_metrics[f"summary/layer_{idx}_cumulative_size"] = after
                 summary_metrics[f"summary/cumulative_growth/layer_{idx}"] = after - initial
+                summary_metrics[f"summary/cap_hits/layer_{idx}_cumulative"] = float(
+                    self._cap_hit_cumulative[idx]
+                )
             self.logger.log_metrics(summary_metrics, step=self._class_count)
 
     def test_all_levels(self, loader: DataLoader) -> List[float]:

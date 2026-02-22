@@ -209,6 +209,16 @@ def test_paper_fidelity_rejects_mnist_dataset_replay():
         run(cfg)
 
 
+def test_full_class_batch_modes_smoke():
+    cfg = make_toy_cfg()
+    cfg.training.pretrain_batch_mode = "full_class"
+    cfg.training.incremental_batch_mode = "full_class"
+    cfg.experiment.regime = "ndl_ir"
+    cfg.replay.enabled = True
+    result = run(cfg)
+    assert result["trainer"]._class_count == 1
+
+
 def test_mlflow_logging(monkeypatch, tmp_path):
     import scripts.run_experiments as runner
 

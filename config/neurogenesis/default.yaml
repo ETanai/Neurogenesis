@@ -1,8 +1,14 @@
 # Controls how many neurons can be added per layer during neurogenesis.
 max_nodes: [100, 100, 100, 20]        # maximum number of new nodes per layer
+max_growth_rounds: null               # max growth rounds per layer (null => derive from max_nodes)
+max_nodes_legacy_round_semantics: false  # true keeps legacy behavior (max_nodes as round cap only)
 max_outlier_fraction: 0.1     # cap on fraction of units considered outliers
 max_outliers_mode: fraction    # fraction|count trigger semantics for growth
 max_outliers_count: null       # used when max_outliers_mode=count
+max_outliers_count_by_layer: null  # optional per-layer count limits (overrides global count)
+max_outliers_count_auto: none  # none|first_class_fraction
+max_outliers_count_fraction: 0.85  # used when max_outliers_count_auto=first_class_fraction
+max_outliers_count_fraction_by_layer: null  # optional per-layer fractions for auto count derivation
 replay_old_limit: null        # cap total replay samples per class during stability (null = unlimited)
 
 # Phase lengths (in optimizer steps) for neurogenesis training cycles.
@@ -12,13 +18,27 @@ next_layer_epochs: 500         # train once the next layer has new neurons
 
 factor_max_new_nodes: 0.2      # fraction of max_nodes eligible for creation
 factor_new_nodes: 0.01         # actual fraction of nodes to add per cycle
+factor_max_new_nodes_by_layer: null  # optional per-layer max-new-node factors
+factor_new_nodes_by_layer: null      # optional per-layer new-node factors
 carry_forward_min_new_nodes: 0 # if level L grows, optionally force min node add in L+1
+carry_forward_requires_outlier_check: false
+carry_forward_outlier_fraction_min: 0.01
+stability_dataset_mode: stochastic_ratio  # stochastic_ratio|explicit_balanced
+stability_old_per_class: auto_match_new   # int or auto_match_new
+stability_shuffle: true
 
 plasticity_lr_new_decoder_factor: 0.01  # multiplier on base_lr for plasticity new-decoder params
 plasticity_lr_old_decoder_factor: 0.01  # multiplier on base_lr for plasticity old-decoder params
 
 thresholds: [0.092, 0.09, 0.08, 0.07]  # reconstruction error thresholds per layer
 threshold_scale: 1.0      # multiplier applied to thresholds (manual or estimated)
+recalibrate_thresholds_each_class: false
+recalibrate_threshold_source: learned_classes_train  # learned_classes_train|learned_classes_val
+recalibrate_percentile: 0.985
+deep_cap_hit_dampening:
+  enabled: false
+  levels: [2, 3]
+  factor_decay: 0.9
 early_stop:
   min_delta: 1.0e-4            # minimum reconstruction improvement to keep growing
   patience: 2                  # stop neurogenesis after N non-improving phases

@@ -1,4 +1,4 @@
-description: "MNIST paper-gap closure sweep balancing reconstruction quality and bounded growth."
+description: "MNIST paper-gap ablation sweep (includes dataset replay controls; not strict paper-fidelity)."
 repetitions: 1
 enforce_paper_fidelity: false
 set_paper_experiment_tag: false

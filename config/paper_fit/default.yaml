@@ -17,9 +17,27 @@ growth:
   normalize: band_width      # band_width|upper
   clamp_per_level: 1.0
 
+growth_shape:
+  enabled: true
+  # Target relative late-vs-early growth pressure (late growth should be smaller than early growth).
+  late_early_ratio_target: 0.6
+  early_window: 3
+  late_window: 3
+  # Soft budget for total cumulative growth across all encoder levels.
+  max_total_growth: 4500
+  # Additional penalty contribution in the overall paper-fit score.
+  weight: 0.25
+
 weights:
   quality: 0.6
   growth: 0.4
+
+quality_first:
+  quality_weight: 0.75
+  growth_weight: 0.15
+  growth_shape_weight: 0.10
+  quality_floor: 0.035
+  quality_floor_penalty: 0.2
 
 pareto:
   enabled: true
