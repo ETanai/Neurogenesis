@@ -1,11 +1,8 @@
-# # tests/conftest.py
-# import os
-# import sys
+from pathlib import Path
+import sys
 
-# # project root / src folder
-# ROOT = os.path.dirname(os.path.dirname(__file__))
-# SRC = os.path.join(ROOT, "src")
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
 
-# # insert ahead of everything else
-# if SRC not in sys.path:
-#     sys.path.insert(0, SRC)
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))

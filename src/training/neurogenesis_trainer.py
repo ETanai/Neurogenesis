@@ -1,3 +1,4 @@
+import inspect
 import math
 from typing import Any, Callable, List, Optional
 
@@ -151,6 +152,12 @@ class NeurogenesisTrainer:
             idx = min(idx, len(self.thresholds) - 1)
             cfg["goal"] = self.thresholds[idx] * factor
         return cfg
+
+    def _call_stability_phase(self, **kwargs):
+        accepted = inspect.signature(self.ae.stability_phase).parameters
+        return self.ae.stability_phase(
+            **{key: value for key, value in kwargs.items() if key in accepted}
+        )
 
     def _model_device(self) -> torch.device:
         params = getattr(self.ae, "parameters", None)
@@ -441,18 +448,19 @@ class NeurogenesisTrainer:
                 last_loss = 1
                 stability_level = int(len(self.ae.encoder) / 2) - 1
                 phase_es_cfg = self._build_phase_early_stop_cfg(level, phase="stability")
-                hist = self.ae.stability_phase(
-                    loader=outliers_loader,
-                    level=stability_level,
-                    lr=self.base_lr,
-                    epochs=self.stability_epochs,
-                    old_x=replay_sampler,
-                    replay_only=replay_only,
-                    eval_batch=self._recon_eval_batch,
-                    early_stop_on_eval=self._recon_eval_batch is not None,
-                    early_stop_cfg=phase_es_cfg,
-                    epoch_logger=epoch_logger,
-                )
+                stability_kwargs = {
+                    "loader": outliers_loader,
+                    "level": stability_level,
+                    "lr": self.base_lr,
+                    "epochs": self.stability_epochs,
+                    "old_x": replay_sampler,
+                    "replay_only": replay_only,
+                    "eval_batch": self._recon_eval_batch,
+                    "early_stop_on_eval": self._recon_eval_batch is not None,
+                    "early_stop_cfg": phase_es_cfg,
+                    "epoch_logger": epoch_logger,
+                }
+                hist = self._call_stability_phase(**stability_kwargs)
 
                 self._log_phase_loss_plot(class_id, level, round_idx)
 
@@ -530,9 +538,9 @@ class NeurogenesisTrainer:
                     early_stop_cfg=phase_es_cfg,
                 )
                 phase_es_cfg = self._build_phase_early_stop_cfg(level + 1, phase="stability")
-                self.ae.stability_phase(
-                    loader,
-                    level + 1,
+                self._call_stability_phase(
+                    loader=loader,
+                    level=level + 1,
                     lr=self.base_lr / 100,
                     epochs=self.stability_epochs,
                     old_x=replay_sampler,

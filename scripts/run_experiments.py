@@ -95,7 +95,11 @@ class _MLflowLogger:
             if self._should_log(str(key))
         }
         if filtered:
-            mlflow.log_metrics(filtered, step=step)
+            if hasattr(mlflow, "log_metrics"):
+                mlflow.log_metrics(filtered, step=step)
+            else:
+                for key, value in filtered.items():
+                    mlflow.log_metric(key, value, step=step)
 
     def log_params(self, params: dict) -> None:
         mlflow.log_params(params)
@@ -114,6 +118,13 @@ class _MLflowLogger:
         # If we are given raw bytes (e.g., PNG), fall back to log_artifact.
         parent = Path(artifact_file).parent.as_posix()
         fname = Path(artifact_file).name
+
+        if isinstance(image_bytes, (bytes, bytearray)) and hasattr(mlflow, "log_image"):
+            try:
+                mlflow.log_image(image_bytes, artifact_file)
+                return
+            except Exception:
+                pass
 
         if isinstance(image_bytes, (bytes, bytearray)):
             with tempfile.TemporaryDirectory() as td:

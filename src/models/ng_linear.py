@@ -28,11 +28,19 @@ class NGLinear(nn.Module):
     def __init__(
         self,
         in_features: int,
-        out_features_mature: int,
+        out_features_mature: int | None = None,
         out_features_plastic: int = 0,
         negative_slope: float = 0.01,
+        out_features_old: int | None = None,
+        out_features_new: int | None = None,
     ):
         super().__init__()
+        if out_features_mature is None:
+            out_features_mature = out_features_old
+        if out_features_new is not None:
+            out_features_plastic = out_features_new
+        if out_features_mature is None:
+            raise TypeError("out_features_mature or out_features_old is required")
         self.in_features = in_features
         self.negative_slope = negative_slope
         self.n_out_features = out_features_mature + out_features_plastic
@@ -60,6 +68,30 @@ class NGLinear(nn.Module):
         n_m = self.weight_mature.size(0)
         n_p = 0 if self.weight_plastic is None else self.weight_plastic.size(0)
         return n_m + n_p
+
+    @property
+    def out_features_old(self) -> int:
+        return self.out_features_mature
+
+    @property
+    def out_features_new(self) -> int:
+        return self.out_features_plastic
+
+    @property
+    def weight_old(self) -> nn.Parameter:
+        return self.weight_mature
+
+    @property
+    def bias_old(self) -> nn.Parameter:
+        return self.bias_mature
+
+    @property
+    def weight_new(self) -> Optional[nn.Parameter]:
+        return self.weight_plastic
+
+    @property
+    def bias_new(self) -> Optional[nn.Parameter]:
+        return self.bias_plastic
 
     # -------------- forward --------------
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -101,6 +133,9 @@ class NGLinear(nn.Module):
         self.out_features_plastic += num_new
         self.n_out_features += num_new
 
+    def add_new_nodes(self, num_new: int) -> None:
+        self.add_plastic_nodes(num_new)
+
     def promote_plastic_to_mature(self) -> None:
         """
         Consolidate plastic block into the mature (frozen) tensors
@@ -124,6 +159,9 @@ class NGLinear(nn.Module):
         self.bias_plastic = None
         self.out_features_mature += self.out_features_plastic
         self.out_features_plastic = 0
+
+    def promote_new_to_old(self) -> None:
+        self.promote_plastic_to_mature()
 
     # -------------- helpers for optimiser --------------
     def parameters_plastic(self) -> Iterable[nn.Parameter]:

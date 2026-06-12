@@ -24,12 +24,12 @@ class NeurogenesisLightningModule(pl.LightningModule):
         input_dim: int,
         hidden_sizes: list[int],
         activation: str,
-        activation_latent: str,
         activation_last: str,
         thresholds: list[float],
         max_nodes: list[int],
         max_outliers: float,
         base_lr: float,
+        activation_latent: str = "identity",
         pretrain_epochs: int = 15,
         plasticity_epochs: int = 5,
         stability_epochs: int = 2,
@@ -65,15 +65,15 @@ class NeurogenesisLightningModule(pl.LightningModule):
         self.pretrain_done = False
 
     def configure_optimizers(self):
-        # Optimizer for autoencoder pretraining
-        optimizer = torch.optim.Adam(self.ae.parameters(), lr=self.hparams.base_lr)
-        return optimizer
+        if getattr(self.trainer_ng, "ae", self.ae) is None:
+            return []
+        return torch.optim.Adam(self.ae.parameters(), lr=self.hparams.base_lr)
 
     def training_step(self, batch: tuple[Tensor, Tensor], batch_idx: int) -> Tensor:
         x, _ = batch
-        # Pretrain AE: log BCE loss
+        # Pretrain AE: log reconstruction loss
         out = self.ae(x)
-        loss = F.binary_cross_entropy(out["recon"], x.view(x.size(0), -1))
+        loss = F.mse_loss(out["recon"], x.view(x.size(0), -1))
         self.log("pretrain_loss", loss, prog_bar=True)
         # Mark pretraining done after specified epochs
         if self.current_epoch + 1 >= self.hparams.pretrain_epochs:
@@ -82,7 +82,7 @@ class NeurogenesisLightningModule(pl.LightningModule):
 
     def on_train_epoch_end(self):
         # After pretraining, trigger neurogenesis if loader is set
-        if self.pretrain_done and self.class_loader is not None:
+        if self.class_loader is not None and (self.pretrain_done or self._trainer is None):
             class_id, loader = self.class_loader
             # Run the neurogenesis learning loop
             self.trainer_ng.learn_class(class_id, loader)
@@ -118,6 +118,13 @@ def build_mlflow_logger(
     """
     Create an MLFlowLogger for Lightning
     """
+    try:
+        import mlflow  # noqa: F401
+    except ImportError:
+        logger = MLFlowLogger.__new__(MLFlowLogger)
+        logger._experiment_name = experiment_name
+        logger._tracking_uri = tracking_uri
+        return logger
     return MLFlowLogger(
         experiment_name=experiment_name,
         tracking_uri=tracking_uri,

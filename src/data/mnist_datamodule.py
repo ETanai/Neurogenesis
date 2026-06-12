@@ -12,8 +12,14 @@ class _MemMNIST(Dataset):
     def __init__(self, train: bool, data_dir: str):
         t = transforms.ToTensor()
         ds = datasets.MNIST(data_dir, train=train, download=True, transform=t)
-        self.data = ds.data.float().div(255).unsqueeze(1)  # [N,1,28,28]
-        self.targets = ds.targets
+        self.source = ds
+        data = ds.data.float()
+        if data.ndim == 3:
+            data = data.unsqueeze(1)
+        if data.max() > 1.0:
+            data = data.div(255)
+        self.data = data  # [N,1,28,28]
+        self.targets = torch.as_tensor(ds.targets, dtype=torch.long)
 
     def __len__(self) -> int:
         return len(self.data)
@@ -66,6 +72,8 @@ class MNISTDataModule(pl.LightningDataModule):
         # load full datasets into RAM
         self.full_train = _MemMNIST(train=True, data_dir=self.hparams.data_dir)
         self.full_val = _MemMNIST(train=False, data_dir=self.hparams.data_dir)
+        self.train_ds = self.full_train.source
+        self.val_ds = self.full_val.source
 
         # dynamic samplers over full sets
         train_idxs = list(range(len(self.full_train)))
