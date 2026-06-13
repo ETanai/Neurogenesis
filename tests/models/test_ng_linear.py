@@ -134,3 +134,19 @@ def test_optimizer_param_groups():
     # And the new-params group:
     assert new_group["lr"] == pytest.approx(base_lr)
     assert set(new_group["params"]) == {layer.weight_new, layer.bias_new}
+
+
+def test_adjust_input_size_preserves_existing_weights_and_adds_columns():
+    layer = NGLinear(in_features=3, out_features_old=2, out_features_new=1)
+    old_weight = layer.weight_old.detach().clone()
+    old_new_weight = layer.weight_new.detach().clone()
+
+    layer.adjust_input_size(2)
+
+    assert torch.allclose(layer.weight_old[:, :3], old_weight)
+    assert torch.allclose(layer.weight_new[:, :3], old_new_weight)
+    assert layer.weight_old[:, 3:].shape == (2, 2)
+    assert layer.weight_new[:, 3:].shape == (1, 2)
+    assert torch.count_nonzero(layer.weight_old[:, 3:]).item() > 0
+    assert torch.count_nonzero(layer.weight_new[:, 3:]).item() > 0
+    assert layer.last_new_input_slice() == slice(3, 5)

@@ -78,7 +78,8 @@ def test_build_mlflow_logger(mlflow_cfg):
     logger = build_mlflow_logger(mlflow_cfg)
     assert isinstance(logger, MLFlowLogger)
     assert logger._experiment_name == "exp"
-    assert logger._tracking_uri == "uri"
+    assert logger._tracking_uri.startswith("sqlite:///")
+    assert logger._tracking_uri.endswith("/uri/mlflow.db")
 
 
 if __name__ == "__main__":

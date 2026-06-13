@@ -194,6 +194,62 @@ def test_plasticity_phase_updates_new_only(simple_ae, toy_input):
     assert not torch.allclose(enc_layer.weight_plastic, old_w_new)
 
 
+def test_neurogenesis_optimizer_lr_ratios(simple_ae):
+    simple_ae.add_new_nodes(0, 1)
+
+    simple_ae.plasticity_decoder_lr_ratio = 0.5
+    plasticity_opt = simple_ae._optim_plasticity(level=0, lr=1.0e-2)
+    plasticity_lrs = sorted(group["lr"] for group in plasticity_opt.param_groups)
+    assert plasticity_lrs == [5.0e-3, 1.0e-2]
+
+    simple_ae.stability_lr_ratio = 0.2
+    stability_opt = simple_ae._optim_stability(level=0, lr=1.0e-2)
+    assert {group["lr"] for group in stability_opt.param_groups} == {2.0e-3}
+
+
+def test_paper_next_layer_optimizer_updates_only_new_columns():
+    torch.manual_seed(7)
+    ae = NGAutoEncoder(
+        input_dim=4,
+        hidden_sizes=[3, 2],
+        activation="identity",
+        activation_latent="identity",
+        activation_last="identity",
+    )
+    ae.next_layer_optimization = "paper_columns"
+    ae.add_new_nodes(0, 1)
+
+    enc_next = ae._encoder_layer(1)
+    dec_next = ae._decoder_layer(1)
+    column_slice = enc_next.last_new_input_slice()
+    assert column_slice == slice(3, 4)
+
+    before = {
+        "enc_weight": enc_next.weight_mature.detach().clone(),
+        "enc_bias": enc_next.bias_mature.detach().clone(),
+        "dec_mature": dec_next.weight_mature.detach().clone(),
+        "dec_plastic": dec_next.weight_plastic.detach().clone(),
+        "level0_mature": ae._encoder_layer(0).weight_mature.detach().clone(),
+    }
+    loader = DataLoader(TensorDataset(torch.randn(8, 4)), batch_size=4)
+
+    ae.plasticity_phase(
+        loader,
+        level=1,
+        epochs=3,
+        lr=1e-2,
+        forward_fn=lambda x: ae.forward_partial(x, 1),
+        train_mature_encoder=True,
+    )
+
+    assert torch.allclose(enc_next.weight_mature[:, :3], before["enc_weight"][:, :3])
+    assert not torch.allclose(enc_next.weight_mature[:, 3:], before["enc_weight"][:, 3:])
+    assert torch.allclose(enc_next.bias_mature, before["enc_bias"])
+    assert torch.allclose(dec_next.weight_mature, before["dec_mature"])
+    assert not torch.allclose(dec_next.weight_plastic, before["dec_plastic"])
+    assert torch.allclose(ae._encoder_layer(0).weight_mature, before["level0_mature"])
+
+
 def test_plasticity_phase_epoch_logger(simple_ae, toy_input):
     simple_ae.add_new_nodes(0, 1)
     loader = DataLoader(TensorDataset(toy_input), batch_size=2)

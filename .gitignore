@@ -19,6 +19,7 @@
 !*/mnist.yaml
 !environment.yml
 !.gitignore
+!docs/papers/**
 
 __pycache__/
 *.py[cod]

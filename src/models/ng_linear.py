@@ -46,6 +46,8 @@ class NGLinear(nn.Module):
         self.n_out_features = out_features_mature + out_features_plastic
         self.out_features_mature = out_features_mature
         self.out_features_plastic = out_features_plastic
+        self._last_new_input_start: int | None = None
+        self._last_new_input_count: int = 0
         # mature (initially frozen) tensors
         self.weight_mature = nn.Parameter(
             torch.empty(out_features_mature, in_features), requires_grad=True
@@ -205,6 +207,8 @@ class NGLinear(nn.Module):
         old_in = self.in_features
         new_in = old_in + num_new_inputs
         self.in_features = new_in
+        self._last_new_input_start = old_in
+        self._last_new_input_count = int(num_new_inputs)
 
         # helper to rebuild a block entirely
         def rebuild_block(old_param: nn.Parameter) -> nn.Parameter:
@@ -220,3 +224,9 @@ class NGLinear(nn.Module):
         # 2) plastic weights (if any)
         if self.weight_plastic is not None:
             self.weight_plastic = rebuild_block(self.weight_plastic)
+
+    def last_new_input_slice(self) -> slice | None:
+        if self._last_new_input_start is None or self._last_new_input_count <= 0:
+            return None
+        start = self._last_new_input_start
+        return slice(start, start + self._last_new_input_count)

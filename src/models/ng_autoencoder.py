@@ -134,6 +134,9 @@ class NGAutoEncoder(nn.Module):
         dec_layers.append(act_last_factory(**act_last_params))
         self.decoder = nn.Sequential(*dec_layers)
         self.update_steps = 0
+        self.plasticity_decoder_lr_ratio = 0.01
+        self.stability_lr_ratio = 0.01
+        self.next_layer_optimization = "broad"
 
     def forward(self, x: Tensor) -> dict[str, Tensor]:
         x_flat = x.view(x.size(0), -1)
@@ -292,7 +295,7 @@ class NGAutoEncoder(nn.Module):
         – train only the new (plastic) nodes at full learning rate
         – freeze all mature (old) parameters
         """
-        small_lr = lr / 100.0
+        small_lr = lr * float(getattr(self, "plasticity_decoder_lr_ratio", 0.01))
         return self._optim_lr_config(
             level=level,
             lr_p=lr,  # new encoder nodes
@@ -306,7 +309,7 @@ class NGAutoEncoder(nn.Module):
         Stability phase:
         – fine‐tune all weights (plastic+mature) at lr/100
         """
-        small_lr = lr / 100.0
+        small_lr = lr * float(getattr(self, "stability_lr_ratio", 0.01))
         return self._optim_lr_config(
             level=level, lr_p=small_lr, lr_m=small_lr, lr_p_d=small_lr, lr_m_d=small_lr
         )
@@ -327,21 +330,23 @@ class NGAutoEncoder(nn.Module):
         - lr_m_d:   old decoder nodes
         """
 
-        # default schedules
-        lr_m = lr_m or (lr_p / 100.0)
-        lr_p_d = lr_p_d or lr_p
-        lr_m_d = lr_m_d or (lr_p / 100.0)
+        # default schedules; keep explicit 0.0 values intact
+        if lr_m is None:
+            lr_m = lr_p / 100.0
+        if lr_p_d is None:
+            lr_p_d = lr_p
+        if lr_m_d is None:
+            lr_m_d = lr_p / 100.0
 
-        # # pick the layer modules
-        # enc = self._encoder_layer(level)
-        # dec = self._decoder_layer(level)
+        enc = self._encoder_layer(level)
+        dec = self._decoder_layer(level)
 
-        # collect disjoint param lists
-        new_enc = [p for p in self.parameters_plastic_enc()]
-        old_enc = [p for p in self.parameters_mature_enc()]
+        # collect disjoint current-level param lists only
+        new_enc = [p for p in enc.parameters_plastic()]
+        old_enc = [p for p in enc.parameters_mature()]
 
-        new_dec = [p for p in self.parameters_plastic_dec()]
-        old_dec = [p for p in self.parameters_mature_dec()]
+        new_dec = [p for p in dec.parameters_plastic()]
+        old_dec = [p for p in dec.parameters_mature()]
 
         # freeze everything first
         for p in self.parameters():
@@ -359,16 +364,73 @@ class NGAutoEncoder(nn.Module):
 
         # build optimizer groups, skip zero-lr groups
         param_groups = []
-        if lr_p != 0:
+        if lr_p != 0 and new_enc:
             param_groups.append({"params": new_enc, "lr": lr_p})
-        if lr_m != 0:
+        if lr_m != 0 and old_enc:
             param_groups.append({"params": old_enc, "lr": lr_m})
-        if lr_p_d != 0:
+        if lr_p_d != 0 and new_dec:
             param_groups.append({"params": new_dec, "lr": lr_p_d})
-        if lr_m_d != 0:
+        if lr_m_d != 0 and old_dec:
             param_groups.append({"params": old_dec, "lr": lr_m_d})
 
         return AdamW(param_groups)
+
+    @staticmethod
+    def _mask_columns_hook(columns: slice):
+        def _hook(grad: Tensor) -> Tensor:
+            masked = torch.zeros_like(grad)
+            masked[:, columns] = grad[:, columns]
+            return masked
+
+        return _hook
+
+    def _optim_next_level_plasticity(self, level: int, lr: float) -> AdamW:
+        """
+        Train the next level after the previous level grew.
+
+        The paper adds random weights from new lower-level nodes into the next
+        level and then trains that next SHL-AE. The default "broad" mode keeps
+        the historical behavior. The "paper_columns" mode uses gradient masks
+        so only the newly appended input columns of the next encoder, plus the
+        matching plastic decoder rows, can update during plasticity.
+        """
+        mode = str(getattr(self, "next_layer_optimization", "broad") or "broad").lower()
+        if mode == "paper_columns":
+            enc = self._encoder_layer(level)
+            dec = self._decoder_layer(level)
+            columns = enc.last_new_input_slice()
+            param_groups = []
+            handles = []
+
+            for p in self.parameters():
+                p.requires_grad_(False)
+
+            if columns is not None:
+                for weight in (enc.weight_mature, enc.weight_plastic):
+                    if weight is None:
+                        continue
+                    weight.requires_grad_(True)
+                    handles.append(weight.register_hook(self._mask_columns_hook(columns)))
+                    param_groups.append({"params": [weight], "lr": lr})
+
+            dec_plastic = list(dec.parameters_plastic())
+            for p in dec_plastic:
+                p.requires_grad_(True)
+            if dec_plastic:
+                param_groups.append({"params": dec_plastic, "lr": lr})
+
+            if param_groups:
+                opt = AdamW(param_groups, weight_decay=0.0)
+                opt._ng_hook_handles = handles  # type: ignore[attr-defined]
+                return opt
+
+        return self._optim_lr_config(
+            level=level,
+            lr_p=lr,
+            lr_m=lr,
+            lr_p_d=lr,
+            lr_m_d=lr,
+        )
 
     def plasticity_phase(
         self,
@@ -379,18 +441,27 @@ class NGAutoEncoder(nn.Module):
         early_stop_cfg: Optional[dict] = None,
         forward_fn: Optional[Callable[[Tensor], Tensor]] = None,
         epoch_logger: Optional[Callable[[int, EpochSummary], None]] = None,
+        train_mature_encoder: bool = False,
     ):
-        opt = self._optim_plasticity(level, lr)
-        es = EarlyStopper(**early_stop_cfg) if early_stop_cfg else None
-        return self._run_epoch_loop(
-            loader,
-            opt,
-            epochs,
-            early_stopper=es,
-            forward_fn=forward_fn,
-            epoch_logger=epoch_logger,
-            loop_label="plasticity",
+        opt = (
+            self._optim_next_level_plasticity(level, lr)
+            if train_mature_encoder
+            else self._optim_plasticity(level, lr)
         )
+        es = EarlyStopper(**early_stop_cfg) if early_stop_cfg else None
+        try:
+            return self._run_epoch_loop(
+                loader,
+                opt,
+                epochs,
+                early_stopper=es,
+                forward_fn=forward_fn,
+                epoch_logger=epoch_logger,
+                loop_label="plasticity",
+            )
+        finally:
+            for handle in getattr(opt, "_ng_hook_handles", []):
+                handle.remove()
 
     def stability_phase(
         self,

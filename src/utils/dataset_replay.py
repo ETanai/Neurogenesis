@@ -145,6 +145,44 @@ class DatasetReplay:
         return self._sample_from_class(int(cls), int(n))
 
     @torch.no_grad()
+    def sample_images_with_labels(
+        self,
+        cls: Optional[int],
+        n: int,
+        *,
+        class_weights: Dict[int, float] | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if cls is not None:
+            samples = self._sample_from_class(int(cls), int(n))
+            labels = torch.full((int(n),), int(cls), dtype=torch.long, device=samples.device)
+            return samples, labels
+
+        if not self.stats:
+            raise RuntimeError("Dataset replay buffer is empty; call fit() first.")
+        weights = class_weights or self._class_weights
+        if not weights:
+            raise RuntimeError("Class weights undefined for dataset replay sampling.")
+        classes = list(weights.keys())
+        probs = torch.tensor(
+            [weights[c] for c in classes],
+            dtype=torch.float32,
+            device=self.device,
+        )
+        probs = probs / probs.sum()
+        draws = torch.multinomial(probs, num_samples=int(n), replacement=True)
+        parts: list[torch.Tensor] = []
+        labels: list[torch.Tensor] = []
+        for cls_idx, count in zip(*torch.unique(draws, return_counts=True)):
+            cls_value = int(classes[int(cls_idx)])
+            count_int = int(count)
+            samples = self._sample_from_class(cls_value, count_int)
+            parts.append(samples)
+            labels.append(
+                torch.full((count_int,), cls_value, dtype=torch.long, device=samples.device)
+            )
+        return torch.cat(parts, dim=0), torch.cat(labels, dim=0)
+
+    @torch.no_grad()
     def sample_image_tensors(
         self,
         cls: Optional[int],
@@ -157,4 +195,3 @@ class DatasetReplay:
         if view_shape is not None:
             return flat.view(n, *view_shape)
         return flat
-

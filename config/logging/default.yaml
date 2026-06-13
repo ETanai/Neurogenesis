@@ -12,5 +12,8 @@ mlflow:
       - plasticity/
       - stability/
       - class_
+      - diagnostics/
+      - replay/
+      - stats/
     exclude_prefixes: []              # optional blacklist evaluated when include_prefixes is null.
     class_metrics: summary            # full | summary | off

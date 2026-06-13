@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import datetime as _dt
 import random
+import sys
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -12,11 +13,14 @@ from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf, open_dict
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from scripts.run_experiments import run
 from scripts.plot_paper_results import plot_from_config, plot_figure4_panels
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-_DEFAULT_MLFLOW_DIR = (REPO_ROOT / "mlruns").resolve()
+_DEFAULT_MLFLOW_DB = (REPO_ROOT / "mlflow.db").resolve()
 
 try:
     import mlflow
@@ -105,10 +109,10 @@ def _log_summary_run(
 
 
 def _default_tracking_uri() -> str:
-    """Return a file-based MLflow tracking URI under the repo's mlruns directory."""
+    """Return a SQLite MLflow tracking URI compatible with MLflow 3.x."""
 
-    _DEFAULT_MLFLOW_DIR.mkdir(parents=True, exist_ok=True)
-    return _DEFAULT_MLFLOW_DIR.as_uri()
+    _DEFAULT_MLFLOW_DB.parent.mkdir(parents=True, exist_ok=True)
+    return f"sqlite:///{_DEFAULT_MLFLOW_DB.as_posix()}"
 
 
 def run_from_config(config_path: Path) -> None:
@@ -128,7 +132,7 @@ def run_from_config(config_path: Path) -> None:
     else:
         resolved_tracking_uri = _default_tracking_uri()
         print(
-            "[run_paper_config] No MLflow tracking URI provided; defaulting to local file store "
+            "[run_paper_config] No MLflow tracking URI provided; defaulting to local SQLite store "
             f"at {resolved_tracking_uri}."
         )
     run_prefix = mlflow_cfg.get("run_name_prefix", config_path.stem)

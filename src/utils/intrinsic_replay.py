@@ -197,6 +197,40 @@ class IntrinsicReplay:
         return recons
 
     @torch.no_grad()
+    def sample_images_with_labels(
+        self,
+        cls: Optional[int],
+        n: int,
+        *,
+        class_weights: Optional[Dict[int, float]] = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if cls is not None:
+            recons = self.sample_images(int(cls), int(n), class_weights=class_weights)
+            labels = torch.full((int(n),), int(cls), dtype=torch.long, device=recons.device)
+            return recons, labels
+
+        if not self.stats:
+            raise RuntimeError("No intrinsic replay statistics have been computed yet.")
+        weights = class_weights or self._class_weights
+        if not weights:
+            raise RuntimeError("Class weights are undefined for intrinsic replay sampling.")
+        classes = list(weights.keys())
+        probs = torch.tensor([weights[c] for c in classes], dtype=torch.float, device=self.device)
+        probs = probs / probs.sum()
+        draw = torch.multinomial(probs, num_samples=int(n), replacement=True)
+        images: list[torch.Tensor] = []
+        labels: list[torch.Tensor] = []
+        for cls_idx, count in zip(*torch.unique(draw, return_counts=True)):
+            cls_value = int(classes[int(cls_idx)])
+            count_int = int(count)
+            recons = self.sample_images(cls_value, count_int)
+            images.append(recons)
+            labels.append(
+                torch.full((count_int,), cls_value, dtype=torch.long, device=recons.device)
+            )
+        return torch.cat(images, dim=0), torch.cat(labels, dim=0)
+
+    @torch.no_grad()
     def sample_image_tensors(
         self, cls: int, n: int, view_shape: Optional[tuple[int, ...]] = None
     ) -> torch.Tensor:

@@ -1,5 +1,9 @@
 # Optimization schedule shared across experiments.
 pretrain_epochs: 14        # epochs dedicated to fitting the base classes
+pretrain_mode: stacked_denoising  # paper-style layer-wise stacked denoising AE
+denoising_dropout: 0.1     # input dropout used during stacked denoising pretraining
+denoising_std: 0.0         # optional additive Gaussian noise during denoising pretraining
+pretrain_finetune_epochs: 0 # optional end-to-end fine-tuning after stacked pretraining
 base_lr: 0.0001             # Adam learning rate
 weight_decay: 0.0          # set >0 to regularize large weights
 device: auto               # torch.device string; auto|cpu|cuda|cuda:0|mps are typical choices.

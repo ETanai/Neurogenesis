@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+from copy import deepcopy
 import inspect
 import io
 import math
@@ -16,7 +17,7 @@ import numpy as np
 import torch
 import tqdm
 from omegaconf import DictConfig, OmegaConf
-from torch.utils.data import DataLoader
+from torch.utils.data import ConcatDataset, DataLoader, Subset
 from tqdm import tqdm
 
 from data.mnist_datamodule import MNISTDataModule
@@ -275,11 +276,41 @@ def _dataloader(dataset, *, batch_size: int, num_workers: int, shuffle: bool) ->
     )
 
 
-def _train_loader_for_classes(dm, classes: Sequence[int], *, shuffle: bool) -> DataLoader:
+def _limit_dataset(dataset, limit: int | None):
+    if limit is None:
+        return dataset
+    try:
+        n_total = len(dataset)
+    except Exception:
+        return dataset
+    n_take = max(0, min(int(limit), int(n_total)))
+    return Subset(dataset, list(range(n_take)))
+
+
+def _train_loader_for_classes(
+    dm,
+    classes: Sequence[int],
+    *,
+    shuffle: bool,
+    limit_per_class: int | None = None,
+) -> DataLoader:
     """
     Reuse a datamodule's persistent train loader by updating its sampler indices.
     Falls back to building a fresh loader if sampler mutation is unsupported.
     """
+    if limit_per_class is not None:
+        limited = [
+            _limit_dataset(_get_class_dataset(dm, int(cls), split="train"), int(limit_per_class))
+            for cls in classes
+        ]
+        subset = limited[0] if len(limited) == 1 else ConcatDataset(limited)
+        batch_size = (
+            getattr(dm, "hparams", {}).get("batch_size", 32)
+            if hasattr(dm, "hparams")
+            else 32
+        )
+        return _dataloader(subset, batch_size=batch_size, num_workers=0, shuffle=shuffle)
+
     # Prefer class/combined loaders on the data module (they reuse workers).
     loader = None
     if len(classes) == 1 and hasattr(dm, "get_class_dataloader"):
@@ -343,19 +374,25 @@ def _log_config_snapshot(cfg: DictConfig, logger) -> None:
 def _log_eval_records(records: list[dict], logger) -> None:
     if not records or isinstance(logger, _NullLogger):
         return
+    default_fields = [
+        "step",
+        "scope",
+        "class_id",
+        "layer",
+        "classes",
+        "mean",
+        "max",
+        "std",
+    ]
+    extra_fields = sorted(
+        {key for row in records for key in row.keys() if key not in default_fields}
+    )
     with tempfile.NamedTemporaryFile(
         "w", suffix="_metrics.csv", delete=False, newline=""
     ) as handle:
         writer = csv.DictWriter(
             handle,
-            fieldnames=[
-                "step",
-                "layer",
-                "classes",
-                "mean",
-                "max",
-                "std",
-            ],
+            fieldnames=[*default_fields, *extra_fields],
         )
         writer.writeheader()
         for row in records:
@@ -422,6 +459,93 @@ def _maybe_make_visual_batch(
     stacked = torch.cat(tensors, dim=0).to(device)
     label_tensor = torch.cat(labels, dim=0).to(device)
     return stacked, label_tensor, splits
+
+
+def _source_index_for_subset(dataset, local_idx: int):
+    """Best-effort source index for deterministic diagnostic sample manifests."""
+
+    if isinstance(dataset, Subset):
+        mapped = dataset.indices[int(local_idx)]
+        return _source_index_for_subset(dataset.dataset, int(mapped))
+    return int(local_idx)
+
+
+def _make_fixed_visual_batch(
+    dm,
+    classes: Sequence[int],
+    device: torch.device,
+    *,
+    split: str = "val",
+    samples_per_class: int | None = None,
+):
+    """Select deterministic visual samples and return a sample-id manifest."""
+
+    classes = [int(cls) for cls in classes]
+    if not classes:
+        return None
+    if samples_per_class is None:
+        samples_per_class = max(1, min(4, 16 // max(1, len(classes))))
+
+    tensors: list[torch.Tensor] = []
+    labels: list[torch.Tensor] = []
+    splits: list[int] = []
+    manifest: list[dict] = []
+    total = 0
+
+    for cls in classes:
+        try:
+            subset = _get_class_dataset(dm, cls, split=split)
+        except Exception:
+            continue
+        try:
+            subset_len = len(subset)
+        except Exception:
+            subset_len = 0
+        if subset_len <= 0:
+            continue
+        take = min(int(samples_per_class), int(subset_len))
+        images: list[torch.Tensor] = []
+        for local_idx in range(take):
+            sample = subset[local_idx]
+            image = sample[0] if isinstance(sample, (tuple, list)) else sample
+            if not torch.is_tensor(image):
+                image = torch.as_tensor(np.array(image))
+            images.append(image.float())
+            manifest.append(
+                {
+                    "class_id": int(cls),
+                    "split": split,
+                    "subset_index": int(local_idx),
+                    "source_index": _source_index_for_subset(subset, local_idx),
+                }
+            )
+        if not images:
+            continue
+        class_tensor = torch.stack(images, dim=0)
+        tensors.append(class_tensor)
+        labels.append(torch.full((class_tensor.size(0),), int(cls), dtype=torch.long))
+        total += class_tensor.size(0)
+        splits.append(total)
+
+    if not tensors:
+        return None
+    stacked = torch.cat(tensors, dim=0).to(device)
+    label_tensor = torch.cat(labels, dim=0).to(device)
+    return stacked, label_tensor, splits, manifest
+
+
+def _unpack_visual_batch(sample):
+    if sample is None:
+        return None
+    if len(sample) == 4:
+        return sample
+    if len(sample) == 3:
+        images, labels, splits = sample
+        return images, labels, splits, []
+    if len(sample) == 2:
+        images, labels = sample
+        return images, labels, [], []
+    raise ValueError("Unexpected visual batch shape")
 
 
 def _infer_view_shape(dm) -> tuple[int, ...] | None:
@@ -794,14 +918,25 @@ def _log_reconstruction_artifacts(
 ) -> None:
     if isinstance(logger, _NullLogger) or plot_recon_grid_mlflow is None:
         return
-    sample = _maybe_make_visual_batch(dm, classes, device)
+    sample = _make_fixed_visual_batch(dm, classes, device)
+    if sample is None:
+        sample = _maybe_make_visual_batch(dm, classes, device)
     if sample is None:
         return
-    images, _, splits = sample
+    images, _, splits, sample_manifest = _unpack_visual_batch(sample)
     view_shape = images.shape[1:]
     total_cols = images.shape[0]
     if total_cols == 0:
         return
+    if sample_manifest:
+        logger.log_dict(
+            {
+                "step": int(step),
+                "classes": [int(cls) for cls in classes],
+                "samples": sample_manifest,
+            },
+            f"diagnostics/fixed_visual_samples_step_{step}.json",
+        )
 
     def _boundary_from_splits() -> int:
         if learned_count <= 0:
@@ -1002,6 +1137,341 @@ def _collect_thresholds(
     return vals
 
 
+def _outlier_stats_for_loader(
+    model: NGAutoEncoder,
+    loader: DataLoader,
+    thresholds: Sequence[float],
+    device: torch.device,
+) -> list[dict]:
+    stats: list[dict] = []
+    was_training = bool(getattr(model, "training", False))
+    model.eval()
+    try:
+        with torch.no_grad():
+            for level, threshold in enumerate(thresholds):
+                errors: list[torch.Tensor] = []
+                for batch in loader:
+                    x = batch[0].to(device, non_blocking=True)
+                    recon = model.forward_partial(x, level)
+                    err = model.reconstruction_error(recon, x)
+                    errors.append(err.detach().cpu())
+                if errors:
+                    all_errs = torch.cat(errors)
+                    n_total = int(all_errs.numel())
+                    n_out = int((all_errs > float(threshold)).sum().item())
+                    mean_v = float(all_errs.mean().item())
+                    max_v = float(all_errs.max().item())
+                else:
+                    n_total = 0
+                    n_out = 0
+                    mean_v = 0.0
+                    max_v = 0.0
+                stats.append(
+                    {
+                        "level": int(level),
+                        "threshold": float(threshold),
+                        "n_total": n_total,
+                        "n_outliers": n_out,
+                        "outlier_fraction": n_out / max(n_total, 1),
+                        "mean_error": mean_v,
+                        "max_error": max_v,
+                    }
+                )
+    finally:
+        model.train(was_training)
+    return stats
+
+
+def _log_threshold_audit(
+    model: NGAutoEncoder,
+    dm,
+    cfg: DictConfig,
+    thresholds: Sequence[float],
+    device: torch.device,
+    logger,
+) -> None:
+    if isinstance(logger, _NullLogger) or not thresholds:
+        return
+    base_classes = [int(cls) for cls in cfg.experiment.base_classes]
+    incremental_classes = [int(cls) for cls in cfg.experiment.incremental_classes]
+    classes = base_classes + [cls for cls in incremental_classes if cls not in base_classes]
+    records: list[dict] = []
+    metrics: dict[str, float] = {}
+
+    for split in ("train", "val"):
+        for cls in classes:
+            try:
+                dataset = _get_class_dataset(dm, cls, split=split)
+            except Exception:
+                continue
+            loader = _dataloader(
+                dataset,
+                batch_size=cfg.data.batch_size,
+                num_workers=cfg.data.num_workers,
+                shuffle=False,
+            )
+            for stat in _outlier_stats_for_loader(model, loader, thresholds, device):
+                level = int(stat["level"])
+                role = "base" if cls in base_classes else "future"
+                record = {
+                    "split": split,
+                    "class_id": int(cls),
+                    "role": role,
+                    **stat,
+                }
+                records.append(record)
+                prefix = f"diagnostics/threshold_audit/{split}/class_{cls}/level_{level}"
+                metrics[f"{prefix}_outlier_fraction"] = float(stat["outlier_fraction"])
+                metrics[f"{prefix}_n_outliers"] = float(stat["n_outliers"])
+                metrics[f"{prefix}_mean_error"] = float(stat["mean_error"])
+
+    if metrics:
+        logger.log_metrics(metrics, step=0)
+    if records:
+        logger.log_dict(
+            {
+                "threshold_source": "manual"
+                if cfg.neurogenesis.get("thresholds", None) is not None
+                else "estimated",
+                "percentile": float(cfg.experiment.threshold.percentile),
+                "records": records,
+            },
+            "diagnostics/threshold_audit.json",
+        )
+
+
+def _group_slice_l2(items: list[tuple[torch.nn.Parameter | None, object | None]]) -> float:
+    total = 0.0
+    for param, slc in items:
+        if param is None:
+            continue
+        tensor = param if slc is None else param[slc]
+        total += float(torch.sum(tensor.detach().float().cpu() ** 2).item())
+    return math.sqrt(total)
+
+
+def _group_grad_l2(items: list[tuple[torch.nn.Parameter | None, object | None]]) -> float:
+    total = 0.0
+    for param, slc in items:
+        if param is None or param.grad is None:
+            continue
+        grad = param.grad if slc is None else param.grad[slc]
+        total += float(torch.sum(grad.detach().float().cpu() ** 2).item())
+    return math.sqrt(total)
+
+
+def _snapshot_group(items: list[tuple[torch.nn.Parameter | None, object | None]]) -> list[torch.Tensor | None]:
+    snapshots: list[torch.Tensor | None] = []
+    for param, slc in items:
+        if param is None:
+            snapshots.append(None)
+            continue
+        tensor = param if slc is None else param[slc]
+        snapshots.append(tensor.detach().clone())
+    return snapshots
+
+
+def _group_delta_l2(
+    items: list[tuple[torch.nn.Parameter | None, object | None]],
+    snapshots: list[torch.Tensor | None],
+) -> float:
+    total = 0.0
+    for (param, slc), before in zip(items, snapshots):
+        if param is None or before is None:
+            continue
+        tensor = param if slc is None else param[slc]
+        diff = tensor.detach().cpu().float() - before.detach().cpu().float()
+        total += float(torch.sum(diff * diff).item())
+    return math.sqrt(total)
+
+
+def _growth_probe_groups(model: NGAutoEncoder, level: int, num_new: int) -> dict[str, list[tuple[torch.nn.Parameter | None, object | None]]]:
+    enc = model._encoder_layer(level)
+    dec_mirror = model._decoder_layer(level)
+    groups: dict[str, list[tuple[torch.nn.Parameter | None, object | None]]] = {
+        "current_encoder_plastic_rows": [(enc.weight_plastic, None), (enc.bias_plastic, None)],
+        "current_encoder_mature": [(enc.weight_mature, None), (enc.bias_mature, None)],
+        "mirror_decoder_new_input_columns": [
+            (dec_mirror.weight_mature, (slice(None), slice(-num_new, None)))
+        ],
+    }
+    if dec_mirror.weight_plastic is not None:
+        groups["mirror_decoder_new_input_columns"].append(
+            (dec_mirror.weight_plastic, (slice(None), slice(-num_new, None)))
+        )
+    if level + 1 < len(model.hidden_sizes):
+        enc_next = model._encoder_layer(level + 1)
+        dec_next = model._decoder_layer(level + 1)
+        groups["next_encoder_new_input_columns"] = [
+            (enc_next.weight_mature, (slice(None), slice(-num_new, None)))
+        ]
+        if enc_next.weight_plastic is not None:
+            groups["next_encoder_new_input_columns"].append(
+                (enc_next.weight_plastic, (slice(None), slice(-num_new, None)))
+            )
+        groups["next_decoder_plastic_rows"] = [
+            (dec_next.weight_plastic, None),
+            (dec_next.bias_plastic, None),
+        ]
+    return groups
+
+
+def _growth_probe_reconstruction(model: NGAutoEncoder, x: torch.Tensor, level: int, objective: str):
+    if objective == "local":
+        return model.forward_partial(x, level)
+    if objective == "next":
+        next_level = min(level + 1, len(model.hidden_sizes) - 1)
+        return model.forward_partial(x, next_level)
+    if objective == "full":
+        out = model(x)
+        return out["recon"] if isinstance(out, dict) else out
+    raise ValueError(f"Unknown growth probe objective '{objective}'")
+
+
+def probe_growth_wiring(
+    model: NGAutoEncoder,
+    sample_images: torch.Tensor,
+    *,
+    num_new: int = 2,
+    lr: float = 1.0e-4,
+    device: torch.device | None = None,
+) -> list[dict]:
+    """Probe computational gradients and plasticity-step updates after growth."""
+
+    if device is None:
+        device = next(model.parameters()).device
+    x = sample_images.to(device).view(sample_images.size(0), -1)
+    records: list[dict] = []
+    objectives = ("local", "next", "full")
+
+    for level in range(len(model.hidden_sizes)):
+        for objective in objectives:
+            if objective == "next" and level + 1 >= len(model.hidden_sizes):
+                continue
+
+            conn_model = deepcopy(model).to(device)
+            conn_model.add_new_nodes(level, int(num_new))
+            conn_model.zero_grad(set_to_none=True)
+            for param in conn_model.parameters():
+                param.requires_grad_(True)
+            conn_groups = _growth_probe_groups(conn_model, level, int(num_new))
+            conn_recon = _growth_probe_reconstruction(conn_model, x, level, objective)
+            conn_loss = conn_model.reconstruction_error(conn_recon, x).mean()
+            conn_loss.backward()
+            conn_grad = {name: _group_grad_l2(items) for name, items in conn_groups.items()}
+
+            step_model = deepcopy(model).to(device)
+            step_model.add_new_nodes(level, int(num_new))
+            step_groups = _growth_probe_groups(step_model, level, int(num_new))
+            snapshots = {name: _snapshot_group(items) for name, items in step_groups.items()}
+            opt = step_model._optim_plasticity(level, lr)
+            step_model.zero_grad(set_to_none=True)
+            step_recon = _growth_probe_reconstruction(step_model, x, level, objective)
+            step_loss = step_model.reconstruction_error(step_recon, x).mean()
+            step_loss.backward()
+            step_grad = {name: _group_grad_l2(items) for name, items in step_groups.items()}
+            opt.step()
+            step_delta = {
+                name: _group_delta_l2(items, snapshots[name])
+                for name, items in step_groups.items()
+            }
+
+            expected_conn = {"current_encoder_plastic_rows", "mirror_decoder_new_input_columns"}
+            if objective in {"next", "full"} and level + 1 < len(model.hidden_sizes):
+                expected_conn.update({"next_encoder_new_input_columns", "next_decoder_plastic_rows"})
+            expected_step = {"current_encoder_plastic_rows", "mirror_decoder_new_input_columns"}
+
+            for group in sorted(step_groups):
+                records.append(
+                    {
+                        "level": int(level),
+                        "objective": objective,
+                        "group": group,
+                        "connectivity_grad_l2": float(conn_grad.get(group, 0.0)),
+                        "plasticity_grad_l2": float(step_grad.get(group, 0.0)),
+                        "plasticity_delta_l2": float(step_delta.get(group, 0.0)),
+                        "expected_connectivity_nonzero": bool(group in expected_conn),
+                        "expected_plasticity_update": bool(group in expected_step),
+                    }
+                )
+    return records
+
+
+def _log_growth_wiring_probe(
+    model: NGAutoEncoder,
+    dm,
+    cfg: DictConfig,
+    device: torch.device,
+    logger,
+) -> None:
+    if isinstance(logger, _NullLogger):
+        return
+    if not bool(cfg.neurogenesis.get("growth_wiring_probe", False)):
+        return
+    classes = list(cfg.experiment.base_classes) + list(cfg.experiment.incremental_classes)
+    sample = _make_fixed_visual_batch(dm, classes, device, samples_per_class=2)
+    if sample is None:
+        sample = _maybe_make_visual_batch(dm, classes, device)
+    if sample is None:
+        return
+    images, _, _, _ = _unpack_visual_batch(sample)
+    records = probe_growth_wiring(
+        model,
+        images,
+        num_new=int(cfg.neurogenesis.get("growth_wiring_nodes", 2)),
+        lr=float(cfg.training.base_lr),
+        device=device,
+    )
+    payload = {"records": records}
+    logger.log_dict(payload, "diagnostics/growth_wiring.json")
+    metrics: dict[str, float] = {}
+    for rec in records:
+        prefix = (
+            f"diagnostics/growth_wiring/level_{rec['level']}/"
+            f"{rec['objective']}/{rec['group']}"
+        )
+        metrics[f"{prefix}_connectivity_grad_l2"] = float(rec["connectivity_grad_l2"])
+        metrics[f"{prefix}_plasticity_grad_l2"] = float(rec["plasticity_grad_l2"])
+        metrics[f"{prefix}_plasticity_delta_l2"] = float(rec["plasticity_delta_l2"])
+    if metrics:
+        logger.log_metrics(metrics, step=0)
+
+
+def _log_tiny_overfit_summary(
+    trainer: NeurogenesisTrainer | IncrementalTrainer,
+    dm,
+    class_id: int,
+    cfg: DictConfig,
+    logger,
+    *,
+    step: int,
+    limit: int,
+) -> dict:
+    dataset = _limit_dataset(_get_class_dataset(dm, int(class_id), split="train"), int(limit))
+    loader = _dataloader(
+        dataset,
+        batch_size=cfg.data.batch_size,
+        num_workers=cfg.data.num_workers,
+        shuffle=False,
+    )
+    mean_losses, max_losses, std_losses = trainer.test_all_levels(loader)
+    record = {
+        "class_id": int(class_id),
+        "train_limit": int(limit),
+        "mean_by_level": [float(v) for v in mean_losses],
+        "max_by_level": [float(v) for v in max_losses],
+        "std_by_level": [float(v) for v in std_losses],
+    }
+    if not isinstance(logger, _NullLogger):
+        metrics = {
+            f"diagnostics/tiny_overfit/class_{class_id}/train_mean_level_{idx}": float(value)
+            for idx, value in enumerate(mean_losses)
+        }
+        logger.log_metrics(metrics, step=step)
+        logger.log_dict(record, "diagnostics/tiny_overfit_summary.json")
+    return record
+
+
 def _dataset_kwargs(func, split: str) -> dict:
     try:
         sig = inspect.signature(func)
@@ -1087,6 +1557,10 @@ def _pretrain(
         lr=cfg.training.base_lr,
         weight_decay=cfg.training.weight_decay,
         device=str(device),
+        mode=cfg.training.get("pretrain_mode", "end_to_end"),
+        denoising_dropout=cfg.training.get("denoising_dropout", 0.0),
+        denoising_std=cfg.training.get("denoising_std", 0.0),
+        finetune_epochs=cfg.training.get("pretrain_finetune_epochs", 0),
     )
     trainer = AutoencoderPretrainer(model, pre_cfg)
     t0 = time.perf_counter()
@@ -1163,6 +1637,8 @@ def _evaluate(
         records.append(
             {
                 "step": step,
+                "scope": "aggregate",
+                "class_id": "",
                 "layer": idx,
                 "classes": classes_repr,
                 "mean": mean_v,
@@ -1170,6 +1646,42 @@ def _evaluate(
                 "std": std_v,
             }
         )
+
+    for cls in classes:
+        cls_int = int(cls)
+        try:
+            cls_subset = _get_class_dataset(dm, cls_int, split="val")
+        except Exception:
+            continue
+        cls_loader = _dataloader(
+            cls_subset,
+            batch_size=cfg.data.batch_size,
+            num_workers=cfg.data.num_workers,
+            shuffle=False,
+        )
+        cls_mean, cls_max, cls_std = trainer.test_all_levels(cls_loader)
+        for idx, (mean_v, max_v, std_v) in enumerate(zip(cls_mean, cls_max, cls_std)):
+            logger.log_metrics(
+                {f"metrics/val_class_{cls_int}_mean_level_{idx}": mean_v}, step=step
+            )
+            logger.log_metrics(
+                {f"metrics/val_class_{cls_int}_max_level_{idx}": max_v}, step=step
+            )
+            logger.log_metrics(
+                {f"metrics/val_class_{cls_int}_std_level_{idx}": std_v}, step=step
+            )
+            records.append(
+                {
+                    "step": step,
+                    "scope": "class",
+                    "class_id": cls_int,
+                    "layer": idx,
+                    "classes": classes_repr,
+                    "mean": mean_v,
+                    "max": max_v,
+                    "std": std_v,
+                }
+            )
     return records
 
 
@@ -1293,6 +1805,8 @@ def run(cfg: DictConfig) -> None:
         for i, thr in enumerate(thresholds):
             logger.log_metrics({f"threshold/level_{i}": float(thr)}, step=0)
             logger.log_metrics({f"threshold/effective_level_{i}": float(thr * thresh_factor)}, step=0)
+        _log_threshold_audit(model, dm, cfg, thresholds, device, logger)
+        _log_growth_wiring_probe(model, dm, cfg, device, logger)
 
     replay = None
     if use_replay:
@@ -1331,7 +1845,11 @@ def run(cfg: DictConfig) -> None:
             ir=replay,
             thresholds=thresholds,
             max_nodes=list(cfg.neurogenesis.max_nodes),
-            max_outliers=cfg.neurogenesis.max_outlier_fraction,
+            max_outliers=cfg.neurogenesis.get(
+                "max_outliers", None
+            )
+            if cfg.neurogenesis.get("max_outliers", None) is not None
+            else cfg.neurogenesis.max_outlier_fraction,
             base_lr=cfg.training.base_lr,
             plasticity_epochs=cfg.neurogenesis.plasticity_epochs,
             stability_epochs=cfg.neurogenesis.stability_epochs,
@@ -1340,6 +1858,15 @@ def run(cfg: DictConfig) -> None:
             factor_new_nodes=cfg.neurogenesis.factor_new_nodes,
             logger=logger,
             early_stop_cfg=cfg.neurogenesis.early_stop,
+            objective_mode=cfg.neurogenesis.get("objective_mode", "paper_local"),
+            plasticity_decoder_lr_ratio=cfg.neurogenesis.get(
+                "plasticity_decoder_lr_ratio", 0.01
+            ),
+            stability_lr_ratio=cfg.neurogenesis.get("stability_lr_ratio", 0.01),
+            next_layer_lr_ratio=cfg.neurogenesis.get("next_layer_lr_ratio", 0.01),
+            next_layer_optimization=cfg.neurogenesis.get(
+                "next_layer_optimization", "broad"
+            ),
             replay_old_limit=cfg.neurogenesis.get("replay_old_limit", None),
             stability_replay_mode=cfg.neurogenesis.get("stability_replay_mode", "ratio"),
             stability_replay_ratio=cfg.neurogenesis.get("stability_replay_ratio", 1.0),
@@ -1362,9 +1889,13 @@ def run(cfg: DictConfig) -> None:
         )
 
     learned: list[int] = list(cfg.experiment.base_classes)
-    all_classes: list[int] = list(cfg.experiment.base_classes) + list(
-        cfg.experiment.incremental_classes
+    configured_incremental_classes = list(cfg.experiment.incremental_classes)
+    incremental_classes = (
+        []
+        if bool(cfg.experiment.get("skip_incremental_training", False))
+        else configured_incremental_classes
     )
+    all_classes: list[int] = list(cfg.experiment.base_classes) + configured_incremental_classes
     trainer.log_global_sizes()
     eval_records: list[dict] = []
     eval_records.extend(_evaluate(trainer, dm, learned, cfg, step=len(learned), logger=logger))
@@ -1391,19 +1922,36 @@ def run(cfg: DictConfig) -> None:
         stage_label=base_stage_label,
     )
 
-    for stage, class_id in enumerate(cfg.experiment.incremental_classes, start=1):
-        subset = _get_class_dataset(dm, class_id, split="train")
+    train_limit_per_class = cfg.experiment.get("incremental_train_limit_per_class", None)
+    for stage, class_id in enumerate(incremental_classes, start=1):
         t_learn0 = time.perf_counter()
-        loader = _train_loader_for_classes(dm, [class_id], shuffle=True)
+        loader = _train_loader_for_classes(
+            dm,
+            [class_id],
+            shuffle=True,
+            limit_per_class=train_limit_per_class,
+        )
         if isinstance(trainer, NeurogenesisTrainer):
-            eval_sample = _maybe_make_visual_batch(dm, learned, device)
+            eval_sample = _make_fixed_visual_batch(dm, learned, device)
+            if eval_sample is None:
+                eval_sample = _maybe_make_visual_batch(dm, learned, device)
             if eval_sample is not None:
-                eval_images, _, _ = eval_sample
+                eval_images, _, _, _ = _unpack_visual_batch(eval_sample)
                 trainer.set_recon_eval_batch(eval_images)
         trainer.learn_class(class_id, loader)
         logger.log_metrics(
             {"timing/learn_class_sec": time.perf_counter() - t_learn0}, step=len(learned) + 1
         )
+        if train_limit_per_class is not None:
+            _log_tiny_overfit_summary(
+                trainer,
+                dm,
+                int(class_id),
+                cfg,
+                logger,
+                step=len(learned) + 1,
+                limit=int(train_limit_per_class),
+            )
         # recompute replay stats for all learned classes with the updated encoder
         learned_so_far = learned + [class_id]
         trainer.log_global_sizes()

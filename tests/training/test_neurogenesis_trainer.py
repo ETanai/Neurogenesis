@@ -1,6 +1,6 @@
 import pytest
 import torch
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, SubsetRandomSampler, TensorDataset
 
 from training.neurogenesis_trainer import NeurogenesisTrainer
 
@@ -173,5 +173,92 @@ def test_threshold_goal_config_injection():
     assert "threshold_goal_factor" not in cfg
 
 
+def test_phase_new_sample_count_prefers_sampler_length():
+    x = torch.randn(10, 1)
+    y = torch.zeros(10, dtype=torch.long)
+    sampler = SubsetRandomSampler([1, 3, 5])
+    loader = DataLoader(TensorDataset(x, y), batch_size=2, sampler=sampler)
+
+    assert NeurogenesisTrainer._phase_new_sample_count(loader, epochs_run=4) == 12
+
+
 if __name__ == "__main__":
     pytest.main()
+
+
+def test_objective_mode_forward_selection():
+    ae = DummyAE(hidden_sizes=[2, 2])
+
+    paper = NeurogenesisTrainer(ae, None, thresholds=[0.5, 0.5], max_nodes=[1, 1], max_outliers=1)
+    assert paper.objective_mode == "paper_local"
+    assert paper._phase_forward_fn(0, "plasticity") is not None
+    assert paper._phase_forward_fn(0, "stability") is not None
+
+    full = NeurogenesisTrainer(
+        ae,
+        None,
+        thresholds=[0.5, 0.5],
+        max_nodes=[1, 1],
+        max_outliers=1,
+        objective_mode="full_reconstruction",
+    )
+    assert full._phase_forward_fn(0, "plasticity") is None
+    assert full._phase_forward_fn(0, "stability") is None
+
+    mixed = NeurogenesisTrainer(
+        ae,
+        None,
+        thresholds=[0.5, 0.5],
+        max_nodes=[1, 1],
+        max_outliers=1,
+        objective_mode="local_plasticity_full_stability",
+    )
+    assert mixed._phase_forward_fn(0, "plasticity") is not None
+    assert mixed._phase_forward_fn(0, "stability") is None
+
+
+def test_invalid_objective_mode_rejected():
+    with pytest.raises(ValueError):
+        NeurogenesisTrainer(
+            DummyAE(hidden_sizes=[2]),
+            None,
+            thresholds=[0.5],
+            max_nodes=[1],
+            max_outliers=1,
+            objective_mode="bogus",
+        )
+
+
+def test_lr_ratio_knobs_are_attached_to_autoencoder():
+    ae = DummyAE(hidden_sizes=[2])
+    trainer = NeurogenesisTrainer(
+        ae,
+        None,
+        thresholds=[0.5],
+        max_nodes=[1],
+        max_outliers=1,
+        plasticity_decoder_lr_ratio=0.25,
+        stability_lr_ratio=0.5,
+        next_layer_lr_ratio=0.75,
+        next_layer_optimization="paper_columns",
+    )
+
+    assert trainer.plasticity_decoder_lr_ratio == 0.25
+    assert trainer.stability_lr_ratio == 0.5
+    assert trainer.next_layer_lr_ratio == 0.75
+    assert trainer.next_layer_optimization == "paper_columns"
+    assert ae.plasticity_decoder_lr_ratio == 0.25
+    assert ae.stability_lr_ratio == 0.5
+    assert ae.next_layer_optimization == "paper_columns"
+
+
+def test_invalid_next_layer_optimization_rejected():
+    with pytest.raises(ValueError):
+        NeurogenesisTrainer(
+            DummyAE(hidden_sizes=[2]),
+            None,
+            thresholds=[0.5],
+            max_nodes=[1],
+            max_outliers=1,
+            next_layer_optimization="too_broad",
+        )

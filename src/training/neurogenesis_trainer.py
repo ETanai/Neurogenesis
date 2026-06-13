@@ -34,6 +34,11 @@ class NeurogenesisTrainer:
         logger: MLFlowLogger = None,
         mean_layer_losses=None,
         early_stop_cfg: dict = None,
+        objective_mode: str = "paper_local",
+        plasticity_decoder_lr_ratio: float = 0.01,
+        stability_lr_ratio: float = 0.01,
+        next_layer_lr_ratio: float = 0.01,
+        next_layer_optimization: str = "broad",
         replay_old_limit: int | None = None,
         stability_replay_mode: str = "ratio",
         stability_replay_ratio: float = 1.0,
@@ -52,6 +57,29 @@ class NeurogenesisTrainer:
         self.factor_new_nodes = factor_new_nodes
         self.mean_layer_losses = mean_layer_losses
         self.early_stop_cfg = early_stop_cfg
+        self.plasticity_decoder_lr_ratio = float(plasticity_decoder_lr_ratio)
+        self.stability_lr_ratio = float(stability_lr_ratio)
+        self.next_layer_lr_ratio = float(next_layer_lr_ratio)
+        self.next_layer_optimization = str(next_layer_optimization or "broad").lower()
+        if self.next_layer_optimization not in {"broad", "paper_columns"}:
+            raise ValueError(
+                "Unknown next_layer_optimization "
+                f"'{next_layer_optimization}'. Expected 'broad' or 'paper_columns'."
+            )
+        self.ae.plasticity_decoder_lr_ratio = self.plasticity_decoder_lr_ratio
+        self.ae.stability_lr_ratio = self.stability_lr_ratio
+        self.ae.next_layer_optimization = self.next_layer_optimization
+        self.objective_mode = str(objective_mode or "paper_local").lower()
+        valid_objective_modes = {
+            "paper_local",
+            "full_reconstruction",
+            "local_plasticity_full_stability",
+        }
+        if self.objective_mode not in valid_objective_modes:
+            raise ValueError(
+                f"Unknown neurogenesis objective_mode '{objective_mode}'. "
+                f"Expected one of {sorted(valid_objective_modes)}."
+            )
         self.replay_old_limit = None if replay_old_limit is None else int(replay_old_limit)
         self.stability_replay_mode = str(stability_replay_mode or "ratio").lower()
         self.stability_replay_ratio = float(stability_replay_ratio)
@@ -60,6 +88,10 @@ class NeurogenesisTrainer:
         self.stability_replay_balanced_max_ratio = float(stability_replay_balanced_max_ratio)
         self._phase_loss_history: dict[tuple[Any, int, int, str], list[float]] = {}
         self._recon_eval_batch: torch.Tensor | None = None
+        self._replay_counters: dict[str, Any] = {
+            "samples": 0,
+            "by_class": {},
+        }
 
         # counter for how many classes we've learned so far
         self._class_count = 0
@@ -127,7 +159,18 @@ class NeurogenesisTrainer:
                     return None
                 take = min(take, remaining)
                 remaining -= take
-            replay_flat = self.ir.sample_images(None, take)
+            labels = None
+            if hasattr(self.ir, "sample_images_with_labels"):
+                replay_flat, labels = self.ir.sample_images_with_labels(None, take)
+            else:
+                replay_flat = self.ir.sample_images(None, take)
+            actual_take = int(replay_flat.size(0))
+            self._replay_counters["samples"] = int(self._replay_counters.get("samples", 0)) + actual_take
+            if labels is not None:
+                by_class = self._replay_counters.setdefault("by_class", {})
+                for label in labels.detach().cpu().tolist():
+                    cls = int(label)
+                    by_class[cls] = int(by_class.get(cls, 0)) + 1
             return replay_flat.to(device, non_blocking=True)
 
         return _sample, replay_only
@@ -159,6 +202,24 @@ class NeurogenesisTrainer:
             **{key: value for key, value in kwargs.items() if key in accepted}
         )
 
+    def _phase_forward_fn(self, level: int, phase: str):
+        """Return the diagnostic reconstruction objective for a neurogenesis phase."""
+        phase = str(phase).lower()
+        if self.objective_mode == "full_reconstruction":
+            return None
+        if (
+            self.objective_mode == "local_plasticity_full_stability"
+            and phase == "stability"
+        ):
+            return None
+        return lambda x, _level=level: self.ae.forward_partial(x, _level)
+
+    def _max_outliers_allowed(self, total_seen: int) -> int:
+        """Interpret max_outliers as an absolute count, or as a fraction below 1."""
+        if self.max_outliers < 1:
+            return int(math.ceil(max(total_seen, 1) * float(self.max_outliers)))
+        return int(self.max_outliers)
+
     def _model_device(self) -> torch.device:
         params = getattr(self.ae, "parameters", None)
         if params is None:
@@ -167,6 +228,92 @@ class NeurogenesisTrainer:
         if first is None:
             return torch.device("cpu")
         return first.device
+
+    def _snapshot_replay_counters(self) -> dict[str, Any]:
+        return {
+            "samples": int(self._replay_counters.get("samples", 0)),
+            "by_class": dict(self._replay_counters.get("by_class", {})),
+        }
+
+    def _log_replay_delta(
+        self,
+        *,
+        before: dict[str, Any],
+        class_id: Any,
+        level: int,
+        round_idx: int,
+        phase: str,
+        new_samples: int,
+    ) -> None:
+        if not self.logger:
+            return
+        after = self._snapshot_replay_counters()
+        replay_samples = int(after["samples"] - before.get("samples", 0))
+        metrics = {
+            f"diagnostics/replay/class_{class_id}/level_{level}/round_{round_idx}/{phase}_new_samples": float(new_samples),
+            f"diagnostics/replay/class_{class_id}/level_{level}/round_{round_idx}/{phase}_replay_samples": float(replay_samples),
+        }
+        before_by_class = before.get("by_class", {})
+        for cls, count in after.get("by_class", {}).items():
+            delta = int(count) - int(before_by_class.get(cls, 0))
+            if delta:
+                metrics[
+                    f"diagnostics/replay/class_{class_id}/level_{level}/round_{round_idx}/{phase}_replay_class_{cls}_samples"
+                ] = float(delta)
+        self.logger.log_metrics(metrics, step=self._class_count)
+
+    def _snapshot_level_params(self, level: int) -> dict[str, list[Tensor]]:
+        enc = self.ae._encoder_layer(level)
+        dec = self.ae._decoder_layer(level)
+        groups = {
+            "new_encoder": list(enc.parameters_plastic()),
+            "old_encoder": list(enc.parameters_mature()),
+            "new_decoder": list(dec.parameters_plastic()),
+            "old_decoder": list(dec.parameters_mature()),
+        }
+        return {
+            name: [param.detach().clone() for param in params]
+            for name, params in groups.items()
+        }
+
+    def _log_param_delta(
+        self,
+        *,
+        before: dict[str, list[Tensor]],
+        class_id: Any,
+        level: int,
+        round_idx: int,
+        phase: str,
+    ) -> None:
+        if not self.logger:
+            return
+        after = self._snapshot_level_params(level)
+        metrics: dict[str, float] = {}
+        for group, before_params in before.items():
+            after_params = after.get(group, [])
+            total_sq = 0.0
+            for old, new in zip(before_params, after_params):
+                if old.shape != new.shape:
+                    continue
+                diff = (new.detach().cpu() - old.detach().cpu()).float()
+                total_sq += float(torch.sum(diff * diff).item())
+            metrics[
+                f"diagnostics/param_delta/class_{class_id}/level_{level}/round_{round_idx}/{phase}_{group}_l2"
+            ] = math.sqrt(total_sq)
+        if metrics:
+            self.logger.log_metrics(metrics, step=self._class_count)
+
+    @staticmethod
+    def _phase_new_sample_count(loader: DataLoader, epochs_run: int) -> int:
+        sampler = getattr(loader, "sampler", None)
+        try:
+            n_samples = len(sampler) if sampler is not None else len(loader.dataset)
+        except Exception:
+            try:
+                n_samples = len(loader) * int(getattr(loader, "batch_size", 1) or 1)
+            except Exception:
+                n_samples = 0
+        return int(n_samples) * int(max(epochs_run, 0))
 
     def _get_recon_errors(self, loader: DataLoader, level: int) -> Tensor:
         """
@@ -374,22 +521,26 @@ class NeurogenesisTrainer:
                     {f"class_{class_id}/growth_level_{level}": self.ae.hidden_sizes[level]},
                     step=added,
                 )
-            max_rounds = self.max_nodes[level]
+            max_new_nodes = int(self.max_nodes[level])
             pbar_growth = tqdm(
-                range(max_rounds), desc=f"  Level {level} Growth", unit="rnd", leave=False
+                range(max_new_nodes), desc=f"  Level {level} Growth", unit="rnd", leave=False
             )
 
             step_plasticety = 0
             step_stability = 0
 
             for _ in pbar_growth:
-                if not (fraction > self.max_outliers and added < max_rounds):
+                max_outliers_allowed = self._max_outliers_allowed(total_seen)
+                if not (n_outliers > max_outliers_allowed and n_plastic_neurons < max_new_nodes):
                     break
 
                 num_new = int(math.ceil(self.factor_new_nodes * n_outliers))
                 nodes_existing = self.ae.encoder[2 * level].n_out_features
                 max_new = int(math.ceil(self.factor_max_new_nodes * nodes_existing))
-                num_new = int(min([num_new, max_new]))
+                remaining_new_nodes = max_new_nodes - n_plastic_neurons
+                num_new = int(min([num_new, max_new, remaining_new_nodes]))
+                if num_new <= 0:
+                    break
 
                 self.ae.add_new_nodes(level, num_new)
                 n_plastic_neurons += num_new
@@ -413,6 +564,10 @@ class NeurogenesisTrainer:
                 round_idx = added + 1
                 epoch_logger = self._build_epoch_logger(class_id, level, round_idx)
                 phase_es_cfg = self._build_phase_early_stop_cfg(level, phase="plasticity")
+                param_before = (
+                    self._snapshot_level_params(level) if self.logger else None
+                )
+                replay_before = self._snapshot_replay_counters()
 
                 hist = self.ae.plasticity_phase(
                     loader=outliers_loader,
@@ -420,8 +575,26 @@ class NeurogenesisTrainer:
                     epochs=self.plasticity_epochs,
                     lr=self.base_lr,
                     early_stop_cfg=phase_es_cfg,
-                    forward_fn=lambda x: self.ae.forward_partial(x, level),
+                    forward_fn=self._phase_forward_fn(level, "plasticity"),
                     epoch_logger=epoch_logger,
+                )
+                if param_before is not None:
+                    self._log_param_delta(
+                        before=param_before,
+                        class_id=class_id,
+                        level=level,
+                        round_idx=round_idx,
+                        phase="plasticity",
+                    )
+                self._log_replay_delta(
+                    before=replay_before,
+                    class_id=class_id,
+                    level=level,
+                    round_idx=round_idx,
+                    phase="plasticity",
+                    new_samples=self._phase_new_sample_count(
+                        outliers_loader, len(hist.get("epoch_loss", []))
+                    ),
                 )
 
                 mean_loss = hist["epoch_loss"][-1]
@@ -446,21 +619,43 @@ class NeurogenesisTrainer:
                 last_loss = mean_loss
 
                 last_loss = 1
-                stability_level = int(len(self.ae.encoder) / 2) - 1
                 phase_es_cfg = self._build_phase_early_stop_cfg(level, phase="stability")
+                param_before = (
+                    self._snapshot_level_params(level) if self.logger else None
+                )
+                replay_before = self._snapshot_replay_counters()
                 stability_kwargs = {
-                    "loader": outliers_loader,
-                    "level": stability_level,
+                    "loader": loader,
+                    "level": level,
                     "lr": self.base_lr,
                     "epochs": self.stability_epochs,
                     "old_x": replay_sampler,
-                    "replay_only": replay_only,
+                    "replay_only": False,
                     "eval_batch": self._recon_eval_batch,
                     "early_stop_on_eval": self._recon_eval_batch is not None,
                     "early_stop_cfg": phase_es_cfg,
+                    "forward_fn": self._phase_forward_fn(level, "stability"),
                     "epoch_logger": epoch_logger,
                 }
                 hist = self._call_stability_phase(**stability_kwargs)
+                if param_before is not None:
+                    self._log_param_delta(
+                        before=param_before,
+                        class_id=class_id,
+                        level=level,
+                        round_idx=round_idx,
+                        phase="stability",
+                    )
+                self._log_replay_delta(
+                    before=replay_before,
+                    class_id=class_id,
+                    level=level,
+                    round_idx=round_idx,
+                    phase="stability",
+                    new_samples=self._phase_new_sample_count(
+                        loader, len(hist.get("epoch_loss", []))
+                    ),
+                )
 
                 self._log_phase_loss_plot(class_id, level, round_idx)
 
@@ -534,20 +729,23 @@ class NeurogenesisTrainer:
                     loader,
                     level + 1,
                     epochs=self.next_layer_epochs,
-                    lr=self.base_lr / 100,
+                    lr=self.base_lr * self.next_layer_lr_ratio,
                     early_stop_cfg=phase_es_cfg,
+                    forward_fn=self._phase_forward_fn(level + 1, "plasticity"),
+                    train_mature_encoder=True,
                 )
                 phase_es_cfg = self._build_phase_early_stop_cfg(level + 1, phase="stability")
                 self._call_stability_phase(
                     loader=loader,
                     level=level + 1,
-                    lr=self.base_lr / 100,
+                    lr=self.base_lr * self.next_layer_lr_ratio,
                     epochs=self.stability_epochs,
                     old_x=replay_sampler,
-                    replay_only=replay_only,
+                    replay_only=False,
                     eval_batch=self._recon_eval_batch,
                     early_stop_on_eval=self._recon_eval_batch is not None,
                     early_stop_cfg=phase_es_cfg,
+                    forward_fn=self._phase_forward_fn(level + 1, "stability"),
                 )
 
             if self.logger:
@@ -579,6 +777,31 @@ class NeurogenesisTrainer:
                 lines.append("No outlier measurements recorded.")
             text = "\n".join(lines)
             self.logger.log_text(text, f"neurogenesis/class_{class_id}_outliers.txt")
+            final_metrics: dict[str, float] = {}
+            for level_idx in range(num_layers):
+                entries = outlier_history.get(level_idx) or []
+                if not entries:
+                    continue
+                final = entries[-1]
+                allowed = self._max_outliers_allowed(int(final["total_seen"]))
+                growth = int(self.ae.hidden_sizes[level_idx] - sizes_before[level_idx])
+                final_metrics[
+                    f"diagnostics/outliers/class_{class_id}/level_{level_idx}_final_count"
+                ] = float(final["n_outliers"])
+                final_metrics[
+                    f"diagnostics/outliers/class_{class_id}/level_{level_idx}_final_fraction"
+                ] = float(final["fraction"])
+                final_metrics[
+                    f"diagnostics/outliers/class_{class_id}/level_{level_idx}_allowed_count"
+                ] = float(allowed)
+                final_metrics[
+                    f"diagnostics/outliers/class_{class_id}/level_{level_idx}_below_threshold"
+                ] = 1.0 if int(final["n_outliers"]) <= allowed else 0.0
+                final_metrics[
+                    f"diagnostics/growth/class_{class_id}/level_{level_idx}_hit_cap"
+                ] = 1.0 if growth >= int(self.max_nodes[level_idx]) else 0.0
+            if final_metrics:
+                self.logger.log_metrics(final_metrics, step=self._class_count)
 
         loader = tqdm(
             loader,

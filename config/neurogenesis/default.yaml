@@ -1,12 +1,24 @@
 # Controls how many neurons can be added per layer during neurogenesis.
 max_nodes: [100, 100, 100, 20]        # maximum number of new nodes per layer
-max_outlier_fraction: 0.1     # cap on fraction of units considered outliers
+max_outliers: null            # paper-style absolute outlier count; null uses fraction below
+max_outlier_fraction: 0.1     # fallback fraction of samples allowed above threshold
 replay_old_limit: null        # cap total replay samples per class during stability (null = unlimited)
+# Diagnostic objective switch. paper_local is the paper-accurate/default path.
+# full_reconstruction and local_plasticity_full_stability are troubleshooting-only.
+objective_mode: paper_local
+
+# Diagnostic-only growth wiring probe. Disabled for normal runs.
+growth_wiring_probe: false
+growth_wiring_nodes: 2
 
 # Phase lengths (in optimizer steps) for neurogenesis training cycles.
 plasticity_epochs: 500         # allow weights to adapt freely
 stability_epochs: 500          # consolidate before evaluating new neurons
 next_layer_epochs: 500         # train once the next layer has new neurons
+plasticity_decoder_lr_ratio: 0.01  # decoder LR during plasticity relative to base_lr
+stability_lr_ratio: 0.01           # all-weight LR during stability relative to base_lr
+next_layer_lr_ratio: 0.01          # next-layer training LR relative to base_lr
+next_layer_optimization: broad     # broad or paper_columns; paper_columns trains only newly added next-layer columns
 
 factor_max_new_nodes: 0.2      # fraction of max_nodes eligible for creation
 factor_new_nodes: 0.01         # actual fraction of nodes to add per cycle
@@ -25,8 +37,8 @@ early_stop:
 #   ratio          -> replay_ratio * batch_size
 #   ratio_schedule -> min(replay_ratio_base * n_old_classes, replay_ratio_max) * batch_size
 #   balanced       -> min(n_old_classes, replay_balanced_max_ratio) * batch_size
-#   only           -> use replay only (no new-class samples)
-stability_replay_mode: only
+#   only           -> debugging mode; use replay only (not paper-accurate)
+stability_replay_mode: ratio
 stability_replay_ratio: 1.0
 stability_replay_ratio_base: 1.0
 stability_replay_ratio_max: 4.0
