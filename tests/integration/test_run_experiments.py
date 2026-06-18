@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Any
+import json
 
 import numpy as np
 import pytest
@@ -93,6 +94,60 @@ def test_run_pipeline_with_toy_data(regime, expect_replay):
 
     assert trainer._class_count == 1
     assert 1 in trainer.history
+
+
+def test_cl_control_hidden_sizes_override_experiment_model():
+    cfg = make_toy_cfg()
+    cfg.experiment.regime = "cl_ir"
+    cfg.experiment.control_hidden_sizes = [8, 4]
+    cfg.replay.sampling_mode = "paper"
+    cfg.replay.per_class_batch_ratio = 0.5
+
+    result = run(cfg)
+
+    assert result["model"].hidden_sizes == [8, 4]
+    assert result["trainer"].ae.hidden_sizes == [8, 4]
+    assert result["trainer"].replay_mode == "paper"
+    assert result["trainer"].replay_per_class_ratio == 0.5
+
+
+def test_toy_run_logs_ir_quality_artifact(tmp_path):
+    mlflow = pytest.importorskip("mlflow")
+    from mlflow.tracking import MlflowClient
+
+    tracking_uri = f"sqlite:///{tmp_path / 'mlflow.db'}"
+    cfg = make_toy_cfg()
+    cfg.experiment.skip_incremental_training = True
+    cfg.replay.mode = "intrinsic"
+    cfg.replay.ir_sampling_mode = "mean_only"
+    cfg.logging.ir_quality_samples_per_class = 4
+    cfg.logging.mlflow = {
+        "enabled": True,
+        "tracking_uri": tracking_uri,
+        "experiment_name": "toy-ir-quality",
+        "run_name": "toy-ir-quality",
+        "metric_filter": None,
+    }
+
+    run(cfg)
+
+    mlflow.set_tracking_uri(tracking_uri)
+    client = MlflowClient()
+    exp = client.get_experiment_by_name("toy-ir-quality")
+    runs = client.search_runs([exp.experiment_id], "tags.mlflow.runName = 'toy-ir-quality'")
+    assert runs
+    artifacts = client.list_artifacts(runs[0].info.run_id, "diagnostics")
+    assert any(artifact.path == "diagnostics/ir_quality_step_1.json" for artifact in artifacts)
+    artifact_path = client.download_artifacts(
+        runs[0].info.run_id,
+        "diagnostics/ir_quality_step_1.json",
+        str(tmp_path / "artifacts"),
+    )
+    payload = json.loads(Path(artifact_path).read_text())
+    cls_payload = payload["classes"]["0"]
+    assert "roundtrip" in cls_payload
+    assert "nearest_neighbor" in cls_payload
+    assert "clean_feature_stats" in cls_payload
 
 
 def _write_sd19_sample(path: Path, seed: int) -> None:

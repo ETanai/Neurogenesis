@@ -2,14 +2,63 @@
 max_nodes: [100, 100, 100, 20]        # maximum number of new nodes per layer
 max_outliers: null            # paper-style absolute outlier count; null uses fraction below
 max_outlier_fraction: 0.1     # fallback fraction of samples allowed above threshold
+max_outliers_by_level: {}     # optional absolute per-level quota override
+max_outlier_fraction_by_level: {}  # optional per-level fraction quota override
 replay_old_limit: null        # cap total replay samples per class during stability (null = unlimited)
-# Diagnostic objective switch. paper_local is the paper-accurate/default path.
-# full_reconstruction and local_plasticity_full_stability are troubleshooting-only.
-objective_mode: paper_local
+# Objective switch:
+#   paper_level_ae -> paper-style isolated SHL-AE per level (default)
+#   global_partial -> historical forward_partial objective to the pixel space
+#   full_reconstruction/local_plasticity_full_stability -> troubleshooting only
+objective_mode: paper_level_ae
 
 # Diagnostic-only growth wiring probe. Disabled for normal runs.
 growth_wiring_probe: false
 growth_wiring_nodes: 2
+
+# Diagnostic-only comparison between the pixel-space outlier criterion used for
+# growth and the local SHL-AE representation-space error used by paper_level_ae.
+outlier_criterion_diagnostics:
+  enabled: false
+  levels: []                # empty means all levels; use [3] for top-layer audits
+  percentiles: [0.95, 0.975, 0.99]
+
+# Diagnostic-only two-gate growth criterion. Disabled by default.
+# When enabled, growth requires both:
+#   1) outlier count above the selected quota, and
+#   2) mean pixel reconstruction error above a quality threshold.
+quality_growth_gate:
+  enabled: false
+  levels: []                # empty means all levels; use [3] for top-layer audits
+  threshold_factor: 1.0     # mean_error must exceed threshold[level] * factor
+  threshold_factor_by_level: {}
+  min_mean_error: null      # optional absolute mean-error floor
+  min_mean_error_by_level: {}
+
+# Diagnostic-only adaptive outlier threshold. Disabled by default.
+# When enabled, selected levels can replace the fixed base-class threshold
+# after one or more growth/stability rounds with a threshold derived from the
+# current class post-training error distribution. This tests whether top-layer
+# growth is driven by an over-strict base-derived tail threshold.
+adaptive_outlier_threshold:
+  enabled: false
+  levels: []                # empty means all levels; use [3] for top-layer audits
+  percentile: 0.55          # e.g. 0.55 leaves about 45% above threshold
+  percentile_by_level: {}
+  min_iteration: 1          # keep the first outlier pass base-thresholded
+  min_iteration_by_level: {}
+  mode: max_base_quantile   # max_base_quantile or quantile
+
+# Diagnostic full-autoencoder coupling phase. Disabled by default.
+# This tests whether local SHL-AE updates need short global reconstruction
+# phases to align the full encoder/decoder stack.
+global_coupling:
+  enabled: false
+  trigger: none          # none, after_base, after_growth_round, after_level, after_class
+  epochs: 5
+  lr_ratio: 0.01
+  scope: all             # all, decoder_only, freeze_old_encoder
+  replay: stability      # stability = current class plus previous-class replay
+  early_stop: null
 
 # Phase lengths (in optimizer steps) for neurogenesis training cycles.
 plasticity_epochs: 500         # allow weights to adapt freely
@@ -22,6 +71,19 @@ next_layer_optimization: broad     # broad or paper_columns; paper_columns train
 
 factor_max_new_nodes: 0.2      # fraction of max_nodes eligible for creation
 factor_new_nodes: 0.01         # actual fraction of nodes to add per cycle
+growth_mode: proportional      # proportional or absolute
+growth_mode_by_level: {}       # optional per-level override, e.g. {3: absolute}
+absolute_new_nodes: 1          # fixed nodes per round when growth_mode is absolute
+absolute_new_nodes_by_level: {}
+factor_new_nodes_by_level: {}
+factor_max_new_nodes_by_level: {}
+shape_pressure_mode: none      # none, scale_growth, scale_gate, or scale_both
+shape_target_ratio: 1.0        # target size_L / size_(L-1) for funnel pressure
+shape_target_ratio_by_level: {}
+shape_min_growth_scale: 0.25
+shape_growth_scale_power: 1.0
+shape_gate_power: 1.0
+shape_max_gate_multiplier: 10.0
 
 thresholds: [0.092, 0.09, 0.08, 0.07]  # reconstruction error thresholds per layer
 early_stop:
@@ -33,13 +95,26 @@ early_stop:
   threshold_goal_factor_plasticity: 0.9  # plasticity-specific threshold multiplier
   threshold_goal_factor_stability: 0.7  # stability-specific threshold multiplier
 
+# Optional early-stop overrides for diagnostics. Precedence:
+# early_stop < early_stop_by_phase < early_stop_by_level < early_stop_by_phase_and_level.
+early_stop_by_phase: {}
+early_stop_by_level: {}
+early_stop_by_phase_and_level: {}
+
 # Stability replay strategy:
 #   ratio          -> replay_ratio * batch_size
 #   ratio_schedule -> min(replay_ratio_base * n_old_classes, replay_ratio_max) * batch_size
 #   balanced       -> min(n_old_classes, replay_balanced_max_ratio) * batch_size
+#   paper          -> per_class_ratio * batch_size from each previously learned class
 #   only           -> debugging mode; use replay only (not paper-accurate)
 stability_replay_mode: ratio
 stability_replay_ratio: 1.0
 stability_replay_ratio_base: 1.0
 stability_replay_ratio_max: 4.0
 stability_replay_balanced_max_ratio: 4.0
+stability_replay_per_class_ratio: 1.0
+stability_replay_class_weights: {}  # diagnostic: redistribute paper replay quota across old classes
+stability_replay_loss_weight: 1.0  # diagnostic: weight replay loss vs current-class loss during stability/coupling
+stability_schedule: mixed          # mixed, current_then_replay, replay_then_current, interleave_epochs, or interleave_batches
+stability_current_epochs_ratio: 1.0  # split-schedule current-class phase length multiplier
+stability_replay_epochs_ratio: 1.0   # split-schedule replay-only phase length multiplier

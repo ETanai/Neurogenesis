@@ -201,6 +201,44 @@ class NGAutoEncoder(nn.Module):
             return out, lat
         return out
 
+    def _level_input(self, x: Tensor, layer_idx: int) -> Tensor:
+        """Return the detached representation used as input to level `layer_idx`."""
+        x_flat = x.view(x.size(0), -1)
+        if layer_idx <= 0:
+            return x_flat.detach()
+        out = x_flat
+        with torch.no_grad():
+            for module in self.encoder[: 2 * layer_idx]:
+                out = module(out)
+        return out.detach()
+
+    def forward_level_ae(
+        self, x: Tensor, layer_idx: int, ret_target: bool = False
+    ) -> Tensor | tuple[Tensor, Tensor]:
+        """Run the isolated paper-style single-hidden-layer AE for one level.
+
+        The paper describes copying out ``AE_L = W_L,b_L; W'_{N+1-L},b'`` and
+        training that SHL-AE. For levels above zero, this reconstructs the
+        previous encoder representation, not the original pixels. The previous
+        representation is detached so gradients cannot leak into lower levels.
+        """
+        if layer_idx < 0 or layer_idx >= len(self.hidden_sizes):
+            raise IndexError(f"layer_idx {layer_idx} out of range")
+
+        target = self._level_input(x, layer_idx)
+        out = target
+        for module in self.encoder[2 * layer_idx : 2 * layer_idx + 2]:
+            out = module(out)
+
+        n = len(self.hidden_sizes)
+        dec_start = 2 * (n - 1 - layer_idx)
+        for module in self.decoder[dec_start : dec_start + 2]:
+            out = module(out)
+
+        if ret_target:
+            return out, target
+        return out
+
     @staticmethod
     def reconstruction_error(x_hat: Tensor, x: Tensor) -> Tensor:
         x_flat = x.view(x.size(0), -1)
@@ -439,7 +477,7 @@ class NGAutoEncoder(nn.Module):
         epochs: int,
         lr: float,
         early_stop_cfg: Optional[dict] = None,
-        forward_fn: Optional[Callable[[Tensor], Tensor]] = None,
+        forward_fn: Optional[Callable[[Tensor], Tensor | tuple[Tensor, Tensor]]] = None,
         epoch_logger: Optional[Callable[[int, EpochSummary], None]] = None,
         train_mature_encoder: bool = False,
     ):
@@ -474,8 +512,10 @@ class NGAutoEncoder(nn.Module):
         eval_batch: Optional[torch.Tensor] = None,
         early_stop_on_eval: bool = False,
         early_stop_cfg: Optional[dict] = None,
-        forward_fn: Optional[Callable[[Tensor], Tensor]] = None,
+        forward_fn: Optional[Callable[[Tensor], Tensor | tuple[Tensor, Tensor]]] = None,
         epoch_logger: Optional[Callable[[int, EpochSummary], None]] = None,
+        replay_loss_weight: float = 1.0,
+        replay_interleave_batches: bool = False,
     ):
         opt = self._optim_stability(level, lr)
         es = EarlyStopper(**early_stop_cfg) if early_stop_cfg else None
@@ -491,6 +531,8 @@ class NGAutoEncoder(nn.Module):
             forward_fn=forward_fn,
             epoch_logger=epoch_logger,
             loop_label="stability",
+            replay_loss_weight=replay_loss_weight,
+            replay_interleave_batches=replay_interleave_batches,
         )
 
     def _run_epoch_loop(
@@ -504,9 +546,11 @@ class NGAutoEncoder(nn.Module):
         early_stop_on_eval: bool = False,
         *,
         early_stopper: Optional[EarlyStopper] = None,
-        forward_fn: Optional[Callable[[Tensor], Tensor]] = None,
+        forward_fn: Optional[Callable[[Tensor], Tensor | tuple[Tensor, Tensor]]] = None,
         epoch_logger: Optional[Callable[[int, EpochSummary], None]] = None,
         loop_label: str = "train",
+        replay_loss_weight: float = 1.0,
+        replay_interleave_batches: bool = False,
     ) -> Dict[str, list[float]]:
         """
         Generic train loop:
@@ -549,7 +593,15 @@ class NGAutoEncoder(nn.Module):
 
                 # -- concat (replay) timing --
                 t0 = perf_counter()
-                if replay is not None:
+                n_new = int(x.size(0))
+                n_replay = 0
+                use_replay_only_batch = bool(
+                    replay_interleave_batches and replay is not None and (n_batches % 2 == 1)
+                )
+                use_current_only_batch = bool(
+                    replay_interleave_batches and replay is not None and not use_replay_only_batch
+                )
+                if replay is not None and not use_current_only_batch:
                     k = int(x.size(0))
                     replay_batch: Optional[Tensor] = None
                     if callable(replay):
@@ -563,8 +615,10 @@ class NGAutoEncoder(nn.Module):
                         if replay_batch.device != device:
                             replay_batch = replay_batch.to(device, non_blocking=True)
                         replay_batch = replay_batch.view(replay_batch.size(0), -1)
-                        if replay_only:
+                        n_replay = int(replay_batch.size(0))
+                        if replay_only or use_replay_only_batch:
                             x = replay_batch
+                            n_new = 0
                         else:
                             x = torch.cat([x, replay_batch], dim=0)
                 if torch.cuda.is_available():
@@ -575,11 +629,16 @@ class NGAutoEncoder(nn.Module):
                 # -- forward timing --
                 t0 = perf_counter()
                 optim.zero_grad(set_to_none=True)
+                target = x
                 if forward_fn is None:
                     out = self.forward(x)
                     x_hat = out["recon"] if isinstance(out, dict) else out
                 else:
-                    x_hat = forward_fn(x)
+                    result = forward_fn(x)
+                    if isinstance(result, tuple):
+                        x_hat, target = result
+                    else:
+                        x_hat = result
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
                 t1 = perf_counter()
@@ -587,7 +646,19 @@ class NGAutoEncoder(nn.Module):
 
                 # -- loss timing --
                 t0 = perf_counter()
-                loss = self.reconstruction_error(x_hat, x).mean()
+                per_sample_error = self.reconstruction_error(x_hat, target)
+                if (
+                    n_replay > 0
+                    and not replay_only
+                    and float(replay_loss_weight) != 1.0
+                ):
+                    weights = torch.ones_like(per_sample_error)
+                    weights[n_new : n_new + n_replay] = float(replay_loss_weight)
+                    loss = (per_sample_error * weights).sum() / weights.sum().clamp_min(
+                        1.0
+                    )
+                else:
+                    loss = per_sample_error.mean()
                 if torch.cuda.is_available():
                     torch.cuda.synchronize()
                 t1 = perf_counter()
@@ -647,12 +718,19 @@ class NGAutoEncoder(nn.Module):
                     eval_x = eval_batch.to(device, non_blocking=True).view(
                         eval_batch.size(0), -1
                     )
+                    eval_target = eval_x
                     if forward_fn is None:
                         out = self.forward(eval_x)
                         eval_hat = out["recon"] if isinstance(out, dict) else out
                     else:
-                        eval_hat = forward_fn(eval_x)
-                    eval_loss = float(self.reconstruction_error(eval_hat, eval_x).mean().item())
+                        result = forward_fn(eval_x)
+                        if isinstance(result, tuple):
+                            eval_hat, eval_target = result
+                        else:
+                            eval_hat = result
+                    eval_loss = float(
+                        self.reconstruction_error(eval_hat, eval_target).mean().item()
+                    )
                 summary["eval_loss"] = eval_loss
 
             # epoch timing summary

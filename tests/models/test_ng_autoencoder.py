@@ -133,6 +133,35 @@ def test_forward_partial_reconstruction(simple_ae, toy_input):
     assert any(grads)
 
 
+def test_forward_level_ae_level0_targets_input(simple_ae, toy_input):
+    x_hat, target = simple_ae.forward_level_ae(toy_input, layer_idx=0, ret_target=True)
+
+    assert x_hat.shape == target.shape == (4, 3)
+    assert torch.allclose(target, toy_input.view(toy_input.size(0), -1))
+
+
+def test_forward_level_ae_isolates_current_pair_from_lower_levels():
+    ae = NGAutoEncoder(
+        input_dim=4,
+        hidden_sizes=[3, 2],
+        activation="identity",
+        activation_latent="identity",
+        activation_last="identity",
+    )
+    x = torch.randn(5, 4)
+
+    x_hat, target = ae.forward_level_ae(x, layer_idx=1, ret_target=True)
+    assert x_hat.shape == target.shape == (5, 3)
+
+    loss = ae.reconstruction_error(x_hat, target).mean()
+    loss.backward()
+
+    assert ae._encoder_layer(0).weight_mature.grad is None
+    assert ae._encoder_layer(1).weight_mature.grad is not None
+    assert ae._decoder_layer(1).weight_mature.grad is not None
+    assert ae._decoder_layer(0).weight_mature.grad is None
+
+
 def test_reconstruction_error_zero():
     x = torch.randn(5, 10)
     err = NGAutoEncoder.reconstruction_error(x, x)
@@ -294,6 +323,36 @@ def test_stability_phase_with_ir(simple_ae, toy_input):
 #     torch.testing.assert_allclose(out[0], toy_input.view(B, -1)[0])
 #     torch.testing.assert_allclose(out[1], out[0])  # identity AE: recon == orig
 
+
+
+def test_stability_phase_can_interleave_current_and_replay_batches():
+    ae = NGAutoEncoder(
+        input_dim=2,
+        hidden_sizes=[2],
+        activation="identity",
+        activation_last="identity",
+    )
+    x = torch.zeros(4, 2)
+    loader = DataLoader(TensorDataset(x), batch_size=1, shuffle=False)
+    replay = torch.ones(4, 2)
+    seen_means = []
+
+    def forward_fn(batch):
+        seen_means.append(float(batch.mean().item()))
+        return batch + 0.0 * ae.forward(batch)["recon"]
+
+    hist = ae.stability_phase(
+        loader=loader,
+        level=0,
+        lr=1e-3,
+        epochs=1,
+        old_x=replay,
+        forward_fn=forward_fn,
+        replay_interleave_batches=True,
+    )
+
+    assert hist["epoch_loss"] == [0.0]
+    assert seen_means == [0.0, 1.0, 0.0, 1.0]
 
 def test_grid_recon_view_shape(simple_ae, toy_input):
     # reshape into (1,3)

@@ -191,6 +191,22 @@ def _apply_experiment_model_overrides(cfg: DictConfig) -> None:
         cfg.model = OmegaConf.merge(cfg.model, exp_model)
 
 
+def _apply_control_model_overrides(cfg: DictConfig) -> None:
+    """Optionally size CL controls to match a completed enlarged NDL network."""
+    regime = str(cfg.experiment.get("regime", "")).lower()
+    if regime not in {"cl", "cl_ir"}:
+        return
+    hidden_sizes = cfg.experiment.get("control_hidden_sizes", None)
+    if hidden_sizes is None:
+        return
+    sizes = [int(size) for size in list(hidden_sizes)]
+    if not sizes or any(size <= 0 for size in sizes):
+        raise ValueError(
+            "experiment.control_hidden_sizes must be a non-empty list of positive integers."
+        )
+    cfg.model.hidden_sizes = sizes
+
+
 def _infer_image_side(model_cfg: DictConfig) -> int | None:
     input_dim = getattr(model_cfg, "input_dim", None)
     if input_dim is None:
@@ -353,6 +369,21 @@ def _prep_device(cfg: DictConfig) -> torch.device:
     if requested == "auto":
         requested = "cuda" if torch.cuda.is_available() else "cpu"
     return torch.device(requested)
+
+
+def _neurogenesis_early_stop_cfg(cfg: DictConfig) -> dict:
+    """Bundle base and diagnostic early-stop overrides for the trainer."""
+    early_stop = OmegaConf.to_container(cfg.neurogenesis.early_stop, resolve=True)
+    early_stop = dict(early_stop or {})
+    for key in (
+        "early_stop_by_phase",
+        "early_stop_by_level",
+        "early_stop_by_phase_and_level",
+    ):
+        value = cfg.neurogenesis.get(key, None)
+        if value:
+            early_stop[key] = OmegaConf.to_container(value, resolve=True)
+    return early_stop
 
 
 def _seed_everything(seed: int) -> None:
@@ -549,6 +580,12 @@ def _unpack_visual_batch(sample):
 
 
 def _infer_view_shape(dm) -> tuple[int, ...] | None:
+    image_shape = getattr(dm, "image_shape", None)
+    if image_shape is not None:
+        try:
+            return tuple(image_shape)
+        except Exception:
+            pass
     candidates = []
     for attr in (
         "full_train",
@@ -702,6 +739,318 @@ def _log_intrinsic_replay_examples(
 
     if timeline_entry is not None and timeline_entry["class_samples"]:
         timeline_records.append(timeline_entry)
+
+
+def _tensor_stats(flat: torch.Tensor) -> dict:
+    if flat.numel() == 0:
+        return {}
+    flat = flat.detach().float().cpu()
+    return {
+        "mean": float(flat.mean().item()),
+        "std": float(flat.std(unbiased=False).item()),
+        "min": float(flat.min().item()),
+        "max": float(flat.max().item()),
+        "sparsity_le_0_05": float((flat <= 0.05).float().mean().item()),
+        "saturation_ge_0_95": float((flat >= 0.95).float().mean().item()),
+    }
+
+
+def _recon_error_summary(model: NGAutoEncoder, flat: torch.Tensor, *, levels: int) -> dict:
+    summary: dict[str, dict[str, float]] = {}
+    if flat.numel() == 0:
+        return summary
+    for level in range(levels):
+        recon = model.forward_partial(flat, level)
+        err = model.reconstruction_error(recon, flat).detach().float().cpu()
+        summary[f"level_{level}"] = {
+            "mean": float(err.mean().item()),
+            "std": float(err.std(unbiased=False).item()),
+            "min": float(err.min().item()),
+            "max": float(err.max().item()),
+        }
+    return summary
+
+
+def _latent_diagnostics(replay: IntrinsicReplay, cls: int, latents: torch.Tensor) -> dict:
+    if cls not in replay.stats or latents.numel() == 0:
+        return {}
+    mu = replay.stats[cls]["mean"].detach()
+    L = replay.stats[cls]["L"].detach()
+    centered = latents.detach() - mu[None, :]
+    euclid = torch.linalg.norm(centered, dim=1).detach().float().cpu()
+    diag = torch.clamp(torch.diag(L @ L.T), min=1.0e-12)
+    z_diag = centered / torch.sqrt(diag)[None, :]
+    diag_maha = torch.linalg.norm(z_diag, dim=1).detach().float().cpu()
+    try:
+        solved = torch.linalg.solve_triangular(
+            L,
+            centered.T,
+            upper=False,
+        ).T
+        maha = torch.linalg.norm(solved, dim=1).detach().float().cpu()
+    except RuntimeError:
+        maha = diag_maha
+    cov = (L @ L.T).detach().cpu()
+    cond = torch.linalg.cond(cov).item() if cov.numel() > 0 else float("nan")
+    return {
+        "mean_distance_mean": float(euclid.mean().item()),
+        "mean_distance_std": float(euclid.std(unbiased=False).item()),
+        "mahalanobis_mean": float(maha.mean().item()),
+        "mahalanobis_std": float(maha.std(unbiased=False).item()),
+        "diag_mahalanobis_mean": float(diag_maha.mean().item()),
+        "diag_mahalanobis_std": float(diag_maha.std(unbiased=False).item()),
+        "cov_condition": float(cond),
+    }
+
+
+def _nearest_distance_summary(query: torch.Tensor, reference: torch.Tensor) -> dict[str, float]:
+    if query.numel() == 0 or reference.numel() == 0:
+        return {}
+    q = query.detach().float()
+    r = reference.detach().float()
+    distances = torch.cdist(q, r)
+    nearest = distances.min(dim=1).values.detach().cpu()
+    return {
+        "mean": float(nearest.mean().item()),
+        "std": float(nearest.std(unbiased=False).item()),
+        "min": float(nearest.min().item()),
+        "max": float(nearest.max().item()),
+    }
+
+
+def _encode_all_levels(model: NGAutoEncoder, flat: torch.Tensor) -> dict[str, torch.Tensor]:
+    encoded: dict[str, torch.Tensor] = {}
+    with torch.no_grad():
+        for level in range(len(model.hidden_sizes)):
+            _recon, lat = model.forward_partial(flat, level, ret_lat=True)
+            encoded[f"level_{level}"] = lat.detach()
+    return encoded
+
+
+def _feature_stats_by_level(model: NGAutoEncoder, flat: torch.Tensor) -> dict:
+    stats: dict[str, dict[str, float]] = {}
+    for level, lat in _encode_all_levels(model, flat).items():
+        stats[level] = _tensor_stats(lat)
+    return stats
+
+
+def _filter_acceptance_diagnostics(
+    replay: IntrinsicReplay,
+    cls: int,
+    *,
+    n_candidates: int,
+) -> dict[str, float]:
+    if not hasattr(replay, "_sample_class_latent_raw") or not hasattr(replay, "_filter_latents"):
+        return {}
+    if str(getattr(replay, "filter_mode", "none")) == "none":
+        return {"acceptance_rate": 1.0, "accepted": float(n_candidates), "candidates": float(n_candidates)}
+    try:
+        candidates = replay._sample_class_latent_raw(cls, n_candidates)
+        mask = replay._filter_latents(cls, candidates)
+    except Exception:
+        return {}
+    accepted = int(mask.sum().item())
+    return {
+        "acceptance_rate": float(accepted / max(int(n_candidates), 1)),
+        "accepted": float(accepted),
+        "candidates": float(n_candidates),
+    }
+
+
+def _log_ir_quality_diagnostics(
+    replay: IntrinsicReplay | None,
+    model: NGAutoEncoder,
+    dm,
+    classes: Sequence[int],
+    *,
+    view_shape: tuple[int, ...] | None,
+    cfg: DictConfig,
+    device: torch.device,
+    logger,
+    step: int,
+) -> None:
+    if not isinstance(replay, IntrinsicReplay) or isinstance(logger, _NullLogger):
+        return
+    if view_shape is None:
+        return
+    samples_per_class = int(
+        getattr(cfg.logging, "ir_quality_samples_per_class", 64)
+        if hasattr(cfg, "logging")
+        else 64
+    )
+    nn_samples_per_class = int(
+        getattr(cfg.logging, "ir_nn_samples_per_class", 256)
+        if hasattr(cfg, "logging")
+        else 256
+    )
+    samples_per_class = max(1, samples_per_class)
+    nn_samples_per_class = max(samples_per_class, nn_samples_per_class)
+    plot_per_class = max(1, min(6, samples_per_class))
+    classes = sorted({int(c) for c in classes if int(c) in replay.available_classes()})
+    if not classes:
+        return
+
+    payload: dict[str, Any] = {
+        "step": int(step),
+        "sampling_mode": replay.sampling_mode,
+        "cov_shrinkage": float(replay.cov_shrinkage),
+        "noise_scale": float(replay.noise_scale),
+        "samples_per_class": int(samples_per_class),
+        "classes": {},
+    }
+    figure_rows: list[tuple[int, torch.Tensor, torch.Tensor, torch.Tensor]] = []
+    input_dim = int(cfg.model.input_dim)
+
+    for cls in classes:
+        try:
+            subset = _get_class_dataset(dm, cls, split="val")
+            loader = _dataloader(
+                subset,
+                batch_size=nn_samples_per_class,
+                num_workers=0,
+                shuffle=False,
+            )
+            batch = next(iter(loader))
+        except Exception:
+            continue
+        clean_nn = batch[0][:nn_samples_per_class].to(device)
+        clean = clean_nn[:samples_per_class]
+        clean_flat = clean.view(clean.size(0), input_dim)
+        clean_nn_flat = clean_nn.view(clean_nn.size(0), input_dim)
+        try:
+            latents = replay.sample_latent(cls, samples_per_class)
+            generated_flat = replay.decoder(latents)
+        except Exception:
+            continue
+        generated_flat = generated_flat.detach()
+        with torch.no_grad():
+            clean_recon = model(clean_flat)
+            if isinstance(clean_recon, dict):
+                clean_recon = clean_recon.get("recon")
+            clean_recon = clean_recon.detach()
+            generated_reencoded = model.encoder(generated_flat)
+            clean_top = model.encoder(clean_nn_flat)
+            roundtrip = torch.linalg.norm(generated_reencoded - latents, dim=1).detach().cpu()
+            top_nn = _nearest_distance_summary(generated_reencoded, clean_top)
+            pixel_nn = _nearest_distance_summary(generated_flat, clean_nn_flat)
+
+        payload["classes"][str(cls)] = {
+            "clean_pixel_stats": _tensor_stats(clean_flat),
+            "clean_recon_pixel_stats": _tensor_stats(clean_recon),
+            "generated_pixel_stats": _tensor_stats(generated_flat),
+            "clean_feature_stats": _feature_stats_by_level(model, clean_flat),
+            "generated_feature_stats": _feature_stats_by_level(model, generated_flat),
+            "clean_recon_error": _recon_error_summary(
+                model, clean_flat, levels=len(model.hidden_sizes)
+            ),
+            "generated_recon_error": _recon_error_summary(
+                model, generated_flat, levels=len(model.hidden_sizes)
+            ),
+            "latent": _latent_diagnostics(replay, cls, latents),
+            "filter_acceptance": _filter_acceptance_diagnostics(
+                replay,
+                cls,
+                n_candidates=max(samples_per_class, 256),
+            ),
+            "roundtrip": {
+                "mean": float(roundtrip.mean().item()),
+                "std": float(roundtrip.std(unbiased=False).item()),
+                "min": float(roundtrip.min().item()),
+                "max": float(roundtrip.max().item()),
+            },
+            "nearest_neighbor": {
+                "pixel": pixel_nn,
+                "top_latent": top_nn,
+            },
+        }
+        figure_rows.append(
+            (
+                cls,
+                clean[:plot_per_class].detach().cpu(),
+                clean_recon[:plot_per_class].view(-1, *view_shape).detach().cpu(),
+                generated_flat[:plot_per_class].view(-1, *view_shape).detach().cpu(),
+            )
+        )
+
+    if not payload["classes"]:
+        return
+    logger.log_dict(payload, f"diagnostics/ir_quality_step_{step}.json")
+    metric_payload = {}
+    for cls, cls_payload in payload["classes"].items():
+        gen_level = cls_payload["generated_recon_error"].get(
+            f"level_{len(model.hidden_sizes) - 1}", {}
+        )
+        clean_level = cls_payload["clean_recon_error"].get(
+            f"level_{len(model.hidden_sizes) - 1}", {}
+        )
+        if "mean" in gen_level:
+            metric_payload[f"diagnostics/ir_quality/class_{cls}/generated_top_mse"] = gen_level["mean"]
+        if "mean" in clean_level:
+            metric_payload[f"diagnostics/ir_quality/class_{cls}/clean_top_mse"] = clean_level["mean"]
+        latent = cls_payload.get("latent", {})
+        if "mahalanobis_mean" in latent:
+            metric_payload[f"diagnostics/ir_quality/class_{cls}/mahalanobis_mean"] = latent["mahalanobis_mean"]
+        filt = cls_payload.get("filter_acceptance", {})
+        if "acceptance_rate" in filt:
+            metric_payload[f"diagnostics/ir_quality/class_{cls}/filter_acceptance_rate"] = filt["acceptance_rate"]
+        roundtrip = cls_payload.get("roundtrip", {})
+        if "mean" in roundtrip:
+            metric_payload[f"diagnostics/ir_quality/class_{cls}/roundtrip_mean"] = roundtrip["mean"]
+        nn = cls_payload.get("nearest_neighbor", {})
+        if "mean" in nn.get("pixel", {}):
+            metric_payload[f"diagnostics/ir_quality/class_{cls}/pixel_nn_mean"] = nn["pixel"]["mean"]
+        if "mean" in nn.get("top_latent", {}):
+            metric_payload[f"diagnostics/ir_quality/class_{cls}/top_latent_nn_mean"] = nn["top_latent"]["mean"]
+    if metric_payload:
+        logger.log_metrics(metric_payload, step=step)
+
+    if not figure_rows:
+        return
+    try:
+        import matplotlib.pyplot as plt
+    except Exception:
+        return
+    n_rows = len(figure_rows) * 3
+    fig, axes = plt.subplots(
+        n_rows,
+        plot_per_class,
+        figsize=(max(6.0, plot_per_class * 1.2), max(4.0, n_rows * 0.8)),
+        squeeze=False,
+    )
+    cmap = "gray" if len(view_shape) >= 1 and view_shape[0] == 1 else None
+    for row_group, (cls, clean, clean_recon, generated) in enumerate(figure_rows):
+        for row_offset, (label, imgs) in enumerate(
+            (("Clean", clean), ("Recon", clean_recon), ("IR", generated))
+        ):
+            row_idx = row_group * 3 + row_offset
+            for col_idx in range(plot_per_class):
+                ax = axes[row_idx][col_idx]
+                if col_idx < imgs.size(0):
+                    arr = _prepare_plot_array(imgs[col_idx], view_shape)
+                    if arr.ndim == 2:
+                        ax.imshow(arr, cmap=cmap, vmin=0, vmax=1)
+                    else:
+                        ax.imshow(arr, vmin=0, vmax=1)
+                else:
+                    ax.axis("off")
+                ax.set_xticks([])
+                ax.set_yticks([])
+                if col_idx == 0:
+                    ax.set_ylabel(
+                        f"{cls} {label}",
+                        rotation=0,
+                        labelpad=28,
+                        ha="right",
+                        va="center",
+                        fontsize=8,
+                    )
+    fig.suptitle(f"IR quality step {step}", fontsize=12)
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+    _log_matplotlib_artifacts(fig, logger, f"figures/ir_quality_step_{step}")
+    try:
+        plt.close(fig)
+    except Exception:
+        pass
 
 
 def _render_ir_timeline(records: list[dict], view_shape: tuple[int, ...] | None):
@@ -1711,6 +2060,7 @@ def run(cfg: DictConfig) -> None:
     device = _prep_device(cfg)
 
     _apply_experiment_model_overrides(cfg)
+    _apply_control_model_overrides(cfg)
 
     training_stats = {
         "pretrain_parameter_updates": 0,
@@ -1818,7 +2168,16 @@ def run(cfg: DictConfig) -> None:
             )
         elif replay_mode == "intrinsic":
             replay = IntrinsicReplay(
-                model.encoder, model.decoder, eps=cfg.replay.cov_eps, device=device
+                model.encoder,
+                model.decoder,
+                eps=cfg.replay.cov_eps,
+                device=device,
+                sampling_mode=cfg.replay.get("ir_sampling_mode", "gaussian_full"),
+                cov_shrinkage=cfg.replay.get("ir_cov_shrinkage", 0.0),
+                noise_scale=cfg.replay.get("ir_noise_scale", 1.0),
+                filter_mode=cfg.replay.get("ir_filter_mode", "none"),
+                filter_percentile=cfg.replay.get("ir_filter_percentile", 0.95),
+                filter_max_resample=cfg.replay.get("ir_filter_max_resample", 10),
             )
         else:
             raise ValueError(
@@ -1838,6 +2197,17 @@ def run(cfg: DictConfig) -> None:
             step=len(cfg.experiment.base_classes),
         )
         _log_replay_stats(replay, logger, step=len(cfg.experiment.base_classes))
+        _log_ir_quality_diagnostics(
+            replay,
+            model,
+            dm,
+            cfg.experiment.base_classes,
+            view_shape=view_shape,
+            cfg=cfg,
+            device=device,
+            logger=logger,
+            step=len(cfg.experiment.base_classes),
+        )
 
     if use_neurogenesis:
         trainer = NeurogenesisTrainer(
@@ -1850,6 +2220,10 @@ def run(cfg: DictConfig) -> None:
             )
             if cfg.neurogenesis.get("max_outliers", None) is not None
             else cfg.neurogenesis.max_outlier_fraction,
+            max_outliers_by_level=cfg.neurogenesis.get("max_outliers_by_level", {}),
+            max_outlier_fraction_by_level=cfg.neurogenesis.get(
+                "max_outlier_fraction_by_level", {}
+            ),
             base_lr=cfg.training.base_lr,
             plasticity_epochs=cfg.neurogenesis.plasticity_epochs,
             stability_epochs=cfg.neurogenesis.stability_epochs,
@@ -1857,7 +2231,7 @@ def run(cfg: DictConfig) -> None:
             factor_max_new_nodes=cfg.neurogenesis.factor_max_new_nodes,
             factor_new_nodes=cfg.neurogenesis.factor_new_nodes,
             logger=logger,
-            early_stop_cfg=cfg.neurogenesis.early_stop,
+            early_stop_cfg=_neurogenesis_early_stop_cfg(cfg),
             objective_mode=cfg.neurogenesis.get("objective_mode", "paper_local"),
             plasticity_decoder_lr_ratio=cfg.neurogenesis.get(
                 "plasticity_decoder_lr_ratio", 0.01
@@ -1875,6 +2249,57 @@ def run(cfg: DictConfig) -> None:
             stability_replay_balanced_max_ratio=cfg.neurogenesis.get(
                 "stability_replay_balanced_max_ratio", 4.0
             ),
+            stability_replay_per_class_ratio=cfg.neurogenesis.get(
+                "stability_replay_per_class_ratio", 1.0
+            ),
+            stability_replay_class_weights=cfg.neurogenesis.get(
+                "stability_replay_class_weights", {}
+            ),
+            stability_replay_loss_weight=cfg.neurogenesis.get(
+                "stability_replay_loss_weight", 1.0
+            ),
+            stability_schedule=cfg.neurogenesis.get("stability_schedule", "mixed"),
+            stability_current_epochs_ratio=cfg.neurogenesis.get(
+                "stability_current_epochs_ratio", 1.0
+            ),
+            stability_replay_epochs_ratio=cfg.neurogenesis.get(
+                "stability_replay_epochs_ratio", 1.0
+            ),
+            growth_mode=cfg.neurogenesis.get("growth_mode", "proportional"),
+            growth_mode_by_level=cfg.neurogenesis.get("growth_mode_by_level", {}),
+            absolute_new_nodes=cfg.neurogenesis.get("absolute_new_nodes", 1),
+            absolute_new_nodes_by_level=cfg.neurogenesis.get(
+                "absolute_new_nodes_by_level", {}
+            ),
+            factor_new_nodes_by_level=cfg.neurogenesis.get(
+                "factor_new_nodes_by_level", {}
+            ),
+            factor_max_new_nodes_by_level=cfg.neurogenesis.get(
+                "factor_max_new_nodes_by_level", {}
+            ),
+            shape_pressure_mode=cfg.neurogenesis.get("shape_pressure_mode", "none"),
+            shape_target_ratio=cfg.neurogenesis.get("shape_target_ratio", 1.0),
+            shape_target_ratio_by_level=cfg.neurogenesis.get(
+                "shape_target_ratio_by_level", {}
+            ),
+            shape_min_growth_scale=cfg.neurogenesis.get("shape_min_growth_scale", 0.25),
+            shape_growth_scale_power=cfg.neurogenesis.get(
+                "shape_growth_scale_power", 1.0
+            ),
+            shape_gate_power=cfg.neurogenesis.get("shape_gate_power", 1.0),
+            shape_max_gate_multiplier=cfg.neurogenesis.get(
+                "shape_max_gate_multiplier", 10.0
+            ),
+            global_coupling_cfg=cfg.neurogenesis.get("global_coupling", {}),
+            outlier_criterion_diagnostics=cfg.neurogenesis.get(
+                "outlier_criterion_diagnostics", {}
+            ),
+            quality_growth_gate=cfg.neurogenesis.get(
+                "quality_growth_gate", {}
+            ),
+            adaptive_outlier_threshold=cfg.neurogenesis.get(
+                "adaptive_outlier_threshold", {}
+            ),
         )
     else:
         trainer = IncrementalTrainer(
@@ -1884,6 +2309,8 @@ def run(cfg: DictConfig) -> None:
             epochs=cfg.training.incremental_epochs,
             weight_decay=cfg.training.weight_decay,
             replay_ratio=cfg.replay.get("batch_ratio", 1.0),
+            replay_mode=cfg.replay.get("sampling_mode", "ratio"),
+            replay_per_class_ratio=cfg.replay.get("per_class_batch_ratio", 1.0),
             device=device,
             logger=logger,
         )
@@ -1952,25 +2379,47 @@ def run(cfg: DictConfig) -> None:
                 step=len(learned) + 1,
                 limit=int(train_limit_per_class),
             )
-        # recompute replay stats for all learned classes with the updated encoder
+        # Recompute replay stats. By default we refresh every learned class with
+        # the updated encoder; reuse_previous_stats keeps old class replay fixed
+        # and only stores the newly learned class distribution.
         learned_so_far = learned + [class_id]
         trainer.log_global_sizes()
         if replay is not None:
             t_boot_inc0 = time.perf_counter()
+            reuse_previous_stats = bool(cfg.replay.get("reuse_previous_stats", False))
+            replay_update_classes = [class_id] if reuse_previous_stats else learned_so_far
             _bootstrap_replay(
                 replay,
                 dm,
-                learned_so_far,
+                replay_update_classes,
                 batch_size=min(cfg.replay.stats_batch_size, cfg.data.batch_size),
                 num_workers=cfg.data.num_workers,
-                reset_stats=True,
+                reset_stats=not reuse_previous_stats,
             )
             logger.log_metrics(
                 {"timing/replay_update_sec": time.perf_counter() - t_boot_inc0},
                 step=len(learned_so_far),
             )
+            logger.log_metrics(
+                {
+                    "replay/reuse_previous_stats": float(reuse_previous_stats),
+                    "replay/refit_class_count": float(len(replay_update_classes)),
+                },
+                step=len(learned_so_far),
+            )
         learned.append(class_id)
         _log_replay_stats(replay, logger, step=len(learned))
+        _log_ir_quality_diagnostics(
+            replay,
+            model,
+            dm,
+            learned,
+            view_shape=view_shape,
+            cfg=cfg,
+            device=device,
+            logger=logger,
+            step=len(learned),
+        )
         eval_records.extend(_evaluate(trainer, dm, learned, cfg, step=len(learned), logger=logger))
         t_fig0 = time.perf_counter()
         _log_reconstruction_artifacts(

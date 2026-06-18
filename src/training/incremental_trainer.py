@@ -26,6 +26,8 @@ class IncrementalTrainer:
         epochs: int,
         weight_decay: float = 0.0,
         replay_ratio: float = 1.0,
+        replay_mode: str = "ratio",
+        replay_per_class_ratio: float = 1.0,
         device: Optional[torch.device] = None,
         logger: Optional[object] = None,
     ) -> None:
@@ -35,6 +37,12 @@ class IncrementalTrainer:
         self.epochs = int(max(1, epochs))
         self.weight_decay = float(weight_decay)
         self.replay_ratio = max(0.0, float(replay_ratio))
+        self.replay_mode = str(replay_mode or "ratio").lower()
+        if self.replay_mode not in {"ratio", "paper"}:
+            raise ValueError(
+                f"Unknown replay_mode '{replay_mode}'. Expected 'ratio' or 'paper'."
+            )
+        self.replay_per_class_ratio = max(0.0, float(replay_per_class_ratio))
         self.logger = logger
 
         if device is None:
@@ -65,10 +73,22 @@ class IncrementalTrainer:
     def _augment_with_replay(self, inputs: Tensor) -> Tensor:
         if self.ir is None or not self.ir.available_classes():
             return inputs
-        if self.replay_ratio <= 0:
+        if self.replay_mode == "ratio" and self.replay_ratio <= 0:
             return inputs
 
         n_new = inputs.size(0)
+        if self.replay_mode == "paper":
+            classes = list(self.ir.available_classes())
+            per_class = int(math.ceil(self.replay_per_class_ratio * n_new))
+            if not classes or per_class <= 0:
+                return inputs
+            replay_chunks = [self.ir.sample_images(cls, per_class) for cls in classes]
+            replay_flat = torch.cat(replay_chunks, dim=0)
+            replay_tensor = replay_flat.view(replay_flat.size(0), *inputs.shape[1:]).to(
+                inputs.device
+            )
+            return torch.cat([inputs, replay_tensor], dim=0)
+
         n_replay = int(math.ceil(self.replay_ratio * n_new))
         if n_replay <= 0:
             return inputs

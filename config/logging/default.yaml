@@ -17,3 +17,5 @@ mlflow:
       - stats/
     exclude_prefixes: []              # optional blacklist evaluated when include_prefixes is null.
     class_metrics: summary            # full | summary | off
+ir_quality_samples_per_class: 64      # samples per class for intrinsic replay quality diagnostics
+ir_nn_samples_per_class: 256          # clean samples used for IR nearest-neighbor diagnostics
