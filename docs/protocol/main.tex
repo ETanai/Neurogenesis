@@ -1,0 +1,51 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=2.8cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{url}
+\usepackage[round,authoryear]{natbib}
+
+\newcommand{\parencite}[1]{\citep{#1}}
+
+\graphicspath{{../papers/arxiv-1612.03770v2/}{figures/}}
+
+\setlist[itemize]{leftmargin=*,topsep=0.35em,itemsep=0.25em}
+\setlist[enumerate]{leftmargin=*,topsep=0.35em,itemsep=0.25em}
+\newcommand{\todoresult}[1]{\textcolor{red}{TODO(result): #1}}
+\newcommand{\todocite}[1]{\textcolor{orange}{TODO(cite): #1}}
+\newcommand{\artifact}[1]{\path{#1}}
+
+\title{Replication Protocol: Neurogenesis Deep Learning and Dynamic-Capacity Neural Architectures}
+\author{Replication notes}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This protocol documents a replication of Neurogenesis Deep Learning (NDL) and a literature review on neural network architectures that change size during training. The first part describes the original method, the local implementation, and the experimental protocol. The second part organizes related work by architecture-change mechanism: growth, continual-learning expansion, pruning, grow-prune cycles, dynamic sparse rewiring, and architecture morphism. The document is intentionally written as citation-bearing bullet notes so that each point can later be expanded into prose.
+\end{abstract}
+
+\tableofcontents
+\clearpage
+
+\input{sections/01_introduction}
+\input{sections/02_original_paper}
+\input{sections/03_replication_implementation}
+\input{sections/04_experimental_protocol}
+\input{sections/05_results}
+\input{sections/06_literature_review}
+\input{sections/07_discussion}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}

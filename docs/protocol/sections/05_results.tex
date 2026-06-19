@@ -1,0 +1,41 @@
+\section{Results}
+
+\subsection{Available result status}
+\begin{itemize}
+  \item No result artifacts were visible in the workspace during protocol drafting, so numeric claims must remain placeholders until the experiments are run or external outputs are copied into the project.
+  \item All result statements below are structured as slots: each one must be replaced by measured values, linked tables, or generated figures before final submission.
+\end{itemize}
+
+\subsection{Main MNIST comparison}
+\begin{itemize}
+  \item CL baseline: \todoresult{insert final accuracy, forgetting metric if available, hidden sizes, and runtime.}
+  \item CL+IR baseline: \todoresult{insert final accuracy and compare against CL to isolate replay effect.}
+  \item NDL without replay: \todoresult{insert final accuracy and compare against CL to isolate architecture-growth effect.}
+  \item NDL+IR: \todoresult{insert final accuracy and compare against all other MNIST regimes to estimate combined growth/replay effect.}
+  \item Interpretation bullet: if NDL+IR outperforms CL+IR, the replication supports a contribution from architecture growth beyond replay; if not, the result suggests replay explains most of the benefit.
+\end{itemize}
+
+\subsection{SD-19 comparison}
+\begin{itemize}
+  \item SD-19 NDL: \todoresult{insert final accuracy, hidden sizes, total parameter count, and runtime.}
+  \item SD-19 NDL+IR: \todoresult{insert final accuracy and compare with SD-19 NDL.}
+  \item Interpretation bullet: SD-19 should be discussed as a harder scalability check because it better tests whether growth rules remain useful outside the MNIST replication.
+\end{itemize}
+
+\subsection{Architecture growth and efficiency}
+\begin{itemize}
+  \item Hidden-layer growth table: \todoresult{insert initial hidden sizes, final hidden sizes, and number of added neurons per layer.}
+  \item Parameter-efficiency table: \todoresult{insert total parameters and accuracy per parameter for each regime.}
+  \item Runtime table: \todoresult{insert runtime and update-count metrics to separate accuracy gains from compute cost.}
+  \item Interpretation bullet: growth should be reported as both a learning mechanism and a cost because dynamic capacity can improve plasticity while increasing memory and compute.
+\end{itemize}
+
+\subsection{Ablation summary}
+\begin{itemize}
+  \item Growth-shape ablation: \todoresult{insert best/worst growth-shape condition and measured effect.}
+  \item Funnel-shape ablation: \todoresult{insert whether funnel geometry changes growth frequency or accuracy.}
+  \item Global-coupling ablation: \todoresult{insert whether local layer decisions require global coordination.}
+  \item Outlier-quota ablation: \todoresult{insert sensitivity to quota or threshold choices.}
+  \item Early-stop ablation: \todoresult{insert whether stopping criteria alter the qualitative conclusion.}
+  \item Training-protocol ablation: \todoresult{insert whether optimization schedule changes the replication outcome.}
+\end{itemize}

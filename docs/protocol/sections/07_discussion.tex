@@ -1,0 +1,25 @@
+\section{Discussion and Next Writing Steps}
+
+\subsection{Expected interpretation structure}
+\begin{itemize}
+  \item Start by separating the effects of replay, growth, and their combination; otherwise the replication may over-attribute improvements to neurogenesis when replay is responsible.
+  \item Discuss performance and architecture size together because a dynamic-capacity method can improve accuracy by spending more parameters.
+  \item Treat SD-19 results as the stronger external-validity check and MNIST results as the controlled replication anchor.
+  \item Use ablations to identify whether the implementation conclusion depends on thresholding, growth geometry, global coupling, stopping rules, or training schedule.
+\end{itemize}
+
+\subsection{Limitations to state explicitly}
+\begin{itemize}
+  \item If only MNIST results are available, the replication should be described as partial and small-scale.
+  \item If result variance across seeds is large, conclusions should be stated in terms of trends rather than definitive ranking.
+  \item If NDL improves accuracy but grows substantially, the report should state the cost rather than only the gain.
+  \item If the local implementation differs from the original paper in training schedule, replay implementation, or dataset preprocessing, those differences should be listed before interpreting discrepancies.
+\end{itemize}
+
+\subsection{Conversion from bullets to prose}
+\begin{itemize}
+  \item Convert each bullet into one short paragraph.
+  \item Keep citations attached to the claim they support.
+  \item Replace every result TODO marker with a table value, figure reference, or explicit statement that the experiment was not run.
+  \item Replace any placeholder citation only after the corresponding Zotero entry has been verified in \artifact{references.bib}.
+\end{itemize}

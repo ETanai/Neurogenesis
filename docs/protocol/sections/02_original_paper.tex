@@ -1,0 +1,30 @@
+\section{Original NDL Paper}
+
+\subsection{Core method}
+\begin{itemize}
+  \item NDL frames new-class learning as a capacity-allocation problem: when a trained model encounters samples that are poorly represented, it should add new neurons rather than only update existing weights \parencite{draelos2017neurogenesis}.
+  \item The original architecture uses stacked autoencoders, which expose layer-wise reconstruction error and therefore provide a local signal for detecting representational bottlenecks \parencite{draelos2017neurogenesis}.
+  \item New neurons are inserted into the layer where reconstruction error indicates insufficient capacity, making NDL a growth-only, neuron-level, layer-local architecture-change method.
+  \item The method is biologically motivated by neurogenesis, but the implemented mechanism is engineering-oriented: monitor reconstruction quality, add units, and retrain affected parameters.
+\end{itemize}
+
+\subsection{Original experimental setting}
+\begin{itemize}
+  \item The original experiments use incremental visual classification settings, including MNIST-style and NIST SD-19-style digit/class learning tasks \parencite{draelos2017neurogenesis}.
+  \item The relevant comparison is not only NDL versus conventional learning, but also the interaction between growth and replay-like mechanisms.
+  \item Original figures from the arXiv source bundle are available in \artifact{docs/papers/arxiv-1612.03770v2/} and can be reused when explaining the paper architecture and reported results.
+\end{itemize}
+
+\subsection{Claims to verify in the replication}
+\begin{itemize}
+  \item NDL should help when new classes introduce patterns that the current representation cannot encode well.
+  \item Intrinsic replay or replay-based stabilization should be evaluated separately because replay can reduce forgetting independently of architecture growth.
+  \item The replication should report both predictive performance and structural side effects, especially hidden-layer size changes and total parameter growth.
+\end{itemize}
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=0.78\linewidth]{Figure1.png}
+  \caption{Original paper figure placeholder from the arXiv source bundle. Replace or relabel with the most relevant original architecture figure during final writing.}
+  \label{fig:original-paper-placeholder}
+\end{figure}

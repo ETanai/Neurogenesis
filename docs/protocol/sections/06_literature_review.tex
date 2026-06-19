@@ -1,0 +1,72 @@
+\section{Literature Review: Size-Changing ANN Architectures}
+
+\subsection{Taxonomy used for the review}
+\begin{itemize}
+  \item Dynamic-capacity methods can be organized by what changes: neurons, channels, layers, modules, weights, masks, or architecture paths.
+  \item They can also be organized by trigger signal: reconstruction error, residual error, task boundary, gradient signal, orthogonality, sparsity penalty, or architecture search.
+  \item NDL belongs to the growth-only branch: it adds neurons at layer-local bottlenecks indicated by reconstruction error \parencite{draelos2017neurogenesis}.
+  \item The local HTML overview in \artifact{docs/papers/dynamic_capacity_taxonomy_original_figures_cl.html} should guide the structure, while Zotero-managed papers should provide the citable evidence.
+\end{itemize}
+
+\subsection{Constructive and growth-only networks}
+\begin{itemize}
+  \item Cascade-Correlation is an early constructive neural-network method that starts with a small network and adds hidden units when residual error indicates that the current architecture is insufficient \parencite{fahlman1990cascade}.
+  \item NDL extends the constructive-network idea into a deep representation-learning setting by using reconstruction error inside a stacked autoencoder hierarchy \parencite{draelos2017neurogenesis}.
+  \item Modern growth methods such as GradMax select new units using gradient-based criteria, replacing NDL's reconstruction-error trigger with an optimization-local growth signal \parencite{evci2022gradmax}.
+  \item Orthogonality-based expansion methods such as NORTH* use activation- or weight-orthogonality triggers to decide when, where, and how many neurons to add \parencite{maile2022north}.
+\end{itemize}
+
+\subsection{Continual-learning expansion}
+\begin{itemize}
+  \item Progressive Neural Networks avoid catastrophic forgetting by freezing old columns and adding new task-specific columns, making expansion a direct forgetting-control mechanism \parencite{rusu2016progressive}.
+  \item Dynamically Expandable Networks add capacity when a new task cannot be represented well by the existing model, combining expansion with selective retraining and regularization \parencite{yoon2018den}.
+  \item DER treats representation size as task-adaptive and links growth to continual-learning stability \parencite{yan2021der}.
+  \item PathNet searches or selects paths through a larger modular network, using architectural routing rather than simple neuron insertion \parencite{fernando2017pathnet}.
+  \item Learn-to-Grow-style methods choose how much sharing or expansion is needed between tasks, making the architecture decision itself part of continual learning \parencite{li2019learn}.
+\end{itemize}
+
+\subsection{Pruning and removal}
+\begin{itemize}
+  \item Magnitude pruning removes low-importance weights after or during training, changing capacity by deletion rather than growth \parencite{han2015deep}.
+  \item Dynamic Network Surgery alternates pruning and splicing so that mistakenly removed connections can be restored \parencite{guo2016dynamic}.
+  \item Network Slimming learns channel-level scale factors and removes channels with low importance, producing structured smaller networks that map better to dense hardware \parencite{liu2017network}.
+  \item L0 regularization uses learned gates to induce sparsity, integrating removal pressure into the objective rather than applying pruning only as a post-processing step \parencite{louizos2018learning}.
+\end{itemize}
+
+\subsection{Grow-prune systems}
+\begin{itemize}
+  \item NeST combines growth and pruning to search for compact architectures, making capacity change bidirectional rather than growth-only \parencite{dai2018nest}.
+  \item MorphNet learns resource-aware architecture changes and can shrink or expand networks under computational constraints \parencite{gordon2018morphnet}.
+  \item Grow-prune systems are useful comparison points for NDL because they treat added capacity as provisional and later remove unnecessary structure.
+\end{itemize}
+
+\subsection{Dynamic sparse training and rewiring}
+\begin{itemize}
+  \item Sparse Evolutionary Training trains sparse networks while periodically rewiring connections, keeping active parameter count constrained while changing topology \parencite{mocanu2018scalable}.
+  \item RigL uses gradient information to regrow sparse connections, making rewiring more targeted than random sparse evolution \parencite{evci2020rigging}.
+  \item Sparse rewiring differs from NDL because it usually preserves a fixed active-parameter budget rather than monotonically increasing capacity.
+\end{itemize}
+
+\subsection{Architecture morphism and search}
+\begin{itemize}
+  \item Net2Net widens or deepens networks using function-preserving transformations, giving larger models a stable initialization that initially preserves old behavior \parencite{chen2016net2net}.
+  \item Network morphism and transformation-based architecture search generalize this idea by modifying architecture while trying to preserve function or training progress \parencite{wei2016network}.
+  \item Differentiable architecture search methods optimize over architecture choices rather than reacting to reconstruction or residual errors \parencite{liu2019darts}.
+  \item Architecture morphism is an important contrast to NDL because it emphasizes safe transformation of a trained function, while NDL emphasizes local growth triggered by poor representation.
+\end{itemize}
+
+\subsection{Synthesis for the protocol}
+\begin{itemize}
+  \item NDL is best positioned as an early deep-learning example of local, error-triggered, growth-only dynamic capacity.
+  \item Its main strength is interpretability of the growth trigger inside autoencoder layers; its main limitation is dependence on reconstruction modules, which do not directly exist in ordinary classifiers, CNNs, or transformer architectures.
+  \item Later literature broadens the design space along four axes: safer initialization, stronger forgetting protection, resource-aware pruning, and sparse/topological adaptation.
+  \item The final discussion should evaluate whether the replication suggests that NDL's specific reconstruction-error trigger remains compelling compared with later gradient-, task-, sparsity-, or search-driven triggers.
+\end{itemize}
+
+\subsection{Zotero management notes}
+\begin{itemize}
+  \item Use a Zotero group or collection named \artifact{Neurogenesis} for the selected literature set.
+  \item Use Better BibTeX to export the selected references to \artifact{docs/protocol/references.bib}.
+  \item Run the Zotero sync workflow in dry-run mode before importing missing entries, then rerun without dry-run only for missing citekeys.
+  \item Keep citekeys stable because section bullets already refer to them.
+\end{itemize}

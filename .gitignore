@@ -20,6 +20,19 @@
 !environment.yml
 !.gitignore
 !docs/papers/**
+!docs/protocol/**
+docs/protocol/*.aux
+docs/protocol/*.bbl
+docs/protocol/*.bcf
+docs/protocol/*.blg
+docs/protocol/*.fdb_latexmk
+docs/protocol/*.fls
+docs/protocol/*.log
+docs/protocol/*.out
+docs/protocol/*.pdf
+docs/protocol/*.run.xml
+docs/protocol/*.synctex.gz
+docs/protocol/*.toc
 
 __pycache__/
 *.py[cod]

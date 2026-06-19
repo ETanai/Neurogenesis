@@ -1,0 +1,22 @@
+\section{Introduction}
+
+\subsection{Purpose of the protocol}
+\begin{itemize}
+  \item This protocol documents a local replication of Neurogenesis Deep Learning (NDL), a method for expanding deep networks when new classes arrive after initial training \parencite{draelos2017neurogenesis}.
+  \item The protocol has two linked goals: first, to describe the implementation and experimental evidence for the replication; second, to place NDL inside the broader literature on dynamic-capacity neural networks.
+  \item The writing style is deliberately modular: each bullet should become one paragraph in the final report, with the citation already attached to the claim it supports.
+\end{itemize}
+
+\subsection{Research question}
+\begin{itemize}
+  \item Main replication question: does adding neurons in response to representation bottlenecks improve class-incremental learning compared with conventional training baselines?
+  \item Mechanistic question: can reconstruction error in an autoencoder stack serve as a useful signal for deciding where capacity should be added \parencite{draelos2017neurogenesis}?
+  \item Literature question: how does NDL relate to other methods that add, remove, rewire, mask, or morph network parameters during training?
+\end{itemize}
+
+\subsection{Report boundaries}
+\begin{itemize}
+  \item The replication section focuses on the implementation in this repository, especially the configurable paper experiments and ablations.
+  \item The literature section focuses on size-changing or dynamic-capacity artificial neural networks, not on every continual-learning method.
+  \item Continual learning is included when architecture change is central, for example expansion, freezing, task-specific modules, sparse subnetworks, or masks.
+\end{itemize}

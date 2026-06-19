@@ -1,0 +1,45 @@
+\section{Experimental Protocol}
+
+\subsection{Main paper experiments}
+\begin{itemize}
+  \item \artifact{mnist_cl}: MNIST, conventional learning, replay disabled; conventional baseline.
+  \item \artifact{mnist_cl_ir}: MNIST, conventional learning with intrinsic replay; replay-only comparison.
+  \item \artifact{mnist_ndl}: MNIST, neurogenesis without replay; growth-only comparison.
+  \item \artifact{mnist_ndl_ir}: MNIST, neurogenesis with intrinsic replay; growth plus replay.
+  \item \artifact{sd19_ndl}: SD-19, neurogenesis with dataset replay mode; larger dataset comparison.
+  \item \artifact{sd19_ndl_ir}: SD-19, neurogenesis with dataset replay mode; larger dataset comparison with replay condition.
+\end{itemize}
+
+\subsection{Figure 4 replication}
+\begin{itemize}
+  \item The \artifact{config/paper/figure4.yaml} experiment compares CL, NDL, CL+IR, and NDL+IR on MNIST.
+  \item The configured repetition count is five, with sequential seeds starting from 42.
+  \item This experiment should be the main source for a replicated Figure 4-style result once outputs are available.
+\end{itemize}
+
+\subsection{Ablation experiments}
+\begin{itemize}
+  \item Growth-shape ablation: test whether the rule for distributing added capacity affects performance or parameter efficiency.
+  \item Funnel-shape ablation: test whether hidden-layer geometry affects reconstruction bottlenecks and growth behavior.
+  \item Global-coupling ablation: test whether local growth decisions need stronger global coordination.
+  \item Outlier-quota ablation: test whether growth is robust to thresholding or quota choices for poorly reconstructed samples.
+  \item Early-stop ablation: test whether training duration and stopping rules materially change the comparison between regimes.
+  \item Training-protocol ablation: test whether the replication conclusions depend on scheduling and optimization details.
+\end{itemize}
+
+\subsection{Reproducibility checklist}
+\begin{itemize}
+  \item Environment files: \artifact{environment.yml}, \artifact{pyproject.toml}, and \artifact{setup.py}.
+  \item Main command pattern:
+    \begin{quote}
+      \small\texttt{python scripts/run\_paper\_config.py}\\
+      \small\texttt{-{}-config config/paper/figure4.yaml}
+    \end{quote}
+  \item Single-suite command pattern:
+    \begin{quote}
+      \small\texttt{python scripts/run\_paper\_experiments.py}\\
+      \small\texttt{-{}-output outputs/paper\_experiments\_summary.json}
+    \end{quote}
+  \item Required result artifacts: summary JSON, plotted comparison figure, MLflow run metadata if available, and final trained-model structural statistics.
+  \item Hardware metadata: \todoresult{add CPU/GPU, RAM, operating system, Python version, and package environment used for the final runs.}
+\end{itemize}

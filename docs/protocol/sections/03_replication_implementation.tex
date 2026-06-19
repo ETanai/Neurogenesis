@@ -1,0 +1,32 @@
+\section{Replication Implementation}
+
+\subsection{Repository structure}
+\begin{itemize}
+  \item The replication is implemented as a configurable Python project with source code under \artifact{src/}, experiment definitions under \artifact{config/}, and paper-level scripts under \artifact{scripts/}.
+  \item The original paper source is preserved under \artifact{docs/papers/arxiv-1612.03770v2/}, which allows the report to compare local implementation choices against the paper text and figures.
+  \item The dynamic-capacity literature overview is stored as \artifact{docs/papers/dynamic_capacity_taxonomy_original_figures_cl.html}; it should be treated as a local taxonomy draft, not as a citable scholarly source.
+\end{itemize}
+
+\subsection{Implemented experiment families}
+\begin{itemize}
+  \item \artifact{scripts/run_paper_experiments.py} defines a compact paper suite covering MNIST classical learning, MNIST classical learning with intrinsic replay, MNIST NDL, MNIST NDL with intrinsic replay, and SD-19 NDL variants.
+  \item \artifact{scripts/run_paper_config.py} runs YAML-defined paper experiments from \artifact{config/paper/}, supports repeated runs, assigns seeds, logs to MLflow when available, and writes summary artifacts.
+  \item The key paper configurations are \artifact{mnist_cl}, \artifact{mnist_cl_ir}, \artifact{mnist_ndl}, \artifact{mnist_ndl_ir}, \artifact{sd19_ndl}, \artifact{sd19_ndl_ir}, and \artifact{figure4}.
+\end{itemize}
+
+\subsection{Implementation claims to document}
+\begin{itemize}
+  \item Classical learning baselines isolate the effect of ordinary parameter updates without architecture growth.
+  \item Intrinsic replay baselines isolate the effect of replay without architecture growth.
+  \item NDL runs isolate the effect of neurogenesis-style hidden-layer growth.
+  \item NDL with replay evaluates whether growth and replay act as complementary mechanisms.
+  \item SD-19 variants test whether the implementation generalizes beyond the smaller MNIST setting.
+\end{itemize}
+
+\subsection{Implementation evidence to include}
+\begin{itemize}
+  \item Record the exact command used for each run, including the config file path and seed policy.
+  \item Record the final hidden sizes and total parameter counts because architecture growth is the central treatment.
+  \item Record update counts for pretraining, neurogenesis, incremental training, and the full run when the summary JSON exposes them.
+  \item Record runtime and hardware environment as reproducibility metadata rather than as the main result.
+\end{itemize}
