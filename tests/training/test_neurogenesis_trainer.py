@@ -85,10 +85,12 @@ class DummyAE:
 class DummyIR:
     def __init__(self):
         self.fitted = False
+        self.fit_calls = 0
         self._classes: list[int] = []
 
     def fit(self, loader):
         self.fitted = True
+        self.fit_calls += 1
         self._classes = [0]
 
     def available_classes(self):
@@ -137,6 +139,7 @@ def test_learn_class_calls(monkeypatch, dummy_loader):
 
     # IR.fit should be called
     assert ir.fitted
+    assert ir.fit_calls == 1
 
     # For each level we should attempt at least one growth with positive additions
     for level in range(len(max_nodes)):

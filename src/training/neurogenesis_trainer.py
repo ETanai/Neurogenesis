@@ -27,6 +27,7 @@ class NeurogenesisTrainer:
         max_nodes: List[int],
         max_outliers: float,
         base_lr: float = 1e-3,
+        weight_decay: float = 0.0,
         plasticity_epochs: int = 5,
         stability_epochs: int = 2,
         next_layer_epochs: int = 1,
@@ -82,6 +83,7 @@ class NeurogenesisTrainer:
             max_outlier_fraction_by_level or {}
         )
         self.base_lr = base_lr
+        self.weight_decay = float(weight_decay)
         self.logger = logger
         self.factor_max_new_nodes = factor_max_new_nodes
         self.factor_new_nodes = factor_new_nodes
@@ -141,6 +143,7 @@ class NeurogenesisTrainer:
         # doubles).  Keep construction side-effect free in that case; the real
         # model receives these settings when it is supplied normally.
         if self.ae is not None:
+            self.ae.neurogenesis_weight_decay = self.weight_decay
             self.ae.plasticity_decoder_lr_ratio = self.plasticity_decoder_lr_ratio
             self.ae.stability_lr_ratio = self.stability_lr_ratio
             self.ae.next_layer_optimization = self.next_layer_optimization
@@ -1933,7 +1936,9 @@ class NeurogenesisTrainer:
             replay_only=replay_only,
             trigger="after_class",
         )
-        # Fit IR stats for the incoming class
+        # Fit replay state for the incoming class. Experiment orchestration may
+        # refresh this once more after logging, but old classes are deliberately
+        # left untouched here.
 
         if self.logger and outlier_history:
             lines = [f"Outlier progression for class {class_id}"]
@@ -2000,10 +2005,6 @@ class NeurogenesisTrainer:
         if self.ir is not None:
             self.ir.fit(loader)
         self.log_global_sizes()
-
-        # Refresh replay statistics with the now-updated encoder
-        if self.ir is not None:
-            self.ir.fit(loader)
 
         if self.logger and sizes_before:
             summary_metrics = {}

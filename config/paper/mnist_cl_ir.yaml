@@ -16,3 +16,6 @@ runs:
       - experiment=mnist_incremental
       - experiment.regime=cl_ir
       - replay.enabled=true
+      - replay.mode=intrinsic
+      - replay.reuse_previous_stats=true
+      - replay.ir_sampling_mode=gaussian_full

@@ -1,16 +1,17 @@
-description: "SD-19 neurogenesis with dataset replay (no intrinsic replay)."
-repetitions: 1
+description: "SD-19 NDL growth over 20 randomly ordered letter curricula (Figure 8 protocol)."
+repetitions: 20
 seed:
   base: 42
   strategy: sequential
 
 mlflow:
-  experiment_name: neurogenesis-paper-sd19-ndl
-  run_name_prefix: sd19_ndl
+  experiment_name: neurogenesis-paper-sd19-growth-20
+  run_name_prefix: sd19_growth
 
 runs:
-  - name: ndl
-    description: "SD-19 neurogenesis using dataset replay buffer."
+  - name: ndl_dataset
+    description: "SD-19 neurogenesis with clean dataset replay and shuffled letters."
+    shuffle_incremental_classes: true
     overrides:
       - data=sd19
       - experiment=sd19_incremental

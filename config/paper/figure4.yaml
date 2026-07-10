@@ -9,13 +9,6 @@ mlflow:
   run_name_prefix: figure4
 
 runs:
-  - name: cl
-    description: "Conventional learning (no neurogenesis, no replay)."
-    overrides:
-      - data=mnist
-      - experiment=mnist_incremental
-      - experiment.regime=cl
-      - replay.enabled=false
   - name: ndl
     description: "Neurogenesis without intrinsic replay."
     overrides:
@@ -23,13 +16,18 @@ runs:
       - experiment=mnist_incremental
       - experiment.regime=ndl
       - replay.enabled=false
-  - name: cl_ir
-    description: "Conventional learning with intrinsic replay."
+      - neurogenesis.thresholds=null
+      - neurogenesis.objective_mode=paper_level_ae
+      - neurogenesis.next_layer_optimization=paper_columns
+      - neurogenesis.early_stop=null
+  - name: cl
+    description: "Capacity-matched conventional learning (no neurogenesis, no replay)."
+    control_size_from: ndl
     overrides:
       - data=mnist
       - experiment=mnist_incremental
-      - experiment.regime=cl_ir
-      - replay.enabled=true
+      - experiment.regime=cl
+      - replay.enabled=false
   - name: ndl_ir
     description: "Neurogenesis with intrinsic replay."
     overrides:
@@ -37,3 +35,22 @@ runs:
       - experiment=mnist_incremental
       - experiment.regime=ndl_ir
       - replay.enabled=true
+      - replay.mode=intrinsic
+      - replay.reuse_previous_stats=true
+      - replay.ir_sampling_mode=gaussian_full
+      - neurogenesis.thresholds=null
+      - neurogenesis.objective_mode=paper_level_ae
+      - neurogenesis.next_layer_optimization=paper_columns
+      - neurogenesis.stability_replay_mode=paper
+      - neurogenesis.early_stop=null
+  - name: cl_ir
+    description: "Capacity-matched conventional learning with intrinsic replay."
+    control_size_from: ndl_ir
+    overrides:
+      - data=mnist
+      - experiment=mnist_incremental
+      - experiment.regime=cl_ir
+      - replay.enabled=true
+      - replay.mode=intrinsic
+      - replay.reuse_previous_stats=true
+      - replay.ir_sampling_mode=gaussian_full

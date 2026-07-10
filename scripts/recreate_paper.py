@@ -69,8 +69,13 @@ EXPERIMENT_SPECS: list[ExperimentSpec] = [
     ),
     ExperimentSpec(
         name="sd19_ndl_ir",
-        description="SD-19 neurogenesis with dataset replay plus intrinsic replay.",
+        description="SD-19 neurogenesis with intrinsic replay.",
         config_rel_path="config/paper/sd19_ndl_ir.yaml",
+    ),
+    ExperimentSpec(
+        name="sd19_growth_20",
+        description="SD-19 growth over 20 randomly ordered letter curricula.",
+        config_rel_path="config/paper/sd19_growth_20.yaml",
     ),
 ]
 

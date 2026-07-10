@@ -77,6 +77,12 @@ pytest -q
 The test configuration restricts discovery to `tests/`; files under
 `notebooks/` are examples rather than test modules.
 
+Dataset replay is intentionally preserved as a clean-data upper bound. Use it
+to validate the model, growth, and stability schedule before evaluating
+intrinsic replay; a method that fails with original historical samples is not
+expected to be rescued by generated replay samples. Dataset-replay and
+intrinsic-replay results should always be labeled separately.
+
 ## Paper source
 
 The original arXiv v2 source bundle is preserved in
@@ -91,7 +97,10 @@ not the original authors' software release. The implementation includes
 paper-oriented defaults as well as explicitly marked diagnostic and ablation
 options; exact numerical reproduction can still depend on dataset preparation,
 class ordering, hardware, and random seeds. See
-`docs/replication_gap_analysis.md` for the current verification status.
+`docs/replication_gap_analysis.md` for the current verification status and
+`docs/algorithm_fidelity.md` for the operation-level paper-to-code audit. The
+staged experiments, promotion gates, and confirmatory comparisons are defined
+in `docs/replication_validation_plan.md`.
 
 No software license is currently declared. Copyright permission for the paper
 source and permission to use or redistribute the code should be evaluated

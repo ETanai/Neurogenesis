@@ -137,6 +137,7 @@ class NGAutoEncoder(nn.Module):
         self.plasticity_decoder_lr_ratio = 0.01
         self.stability_lr_ratio = 0.01
         self.next_layer_optimization = "broad"
+        self.neurogenesis_weight_decay = 0.0
 
     def forward(self, x: Tensor) -> dict[str, Tensor]:
         x_flat = x.view(x.size(0), -1)
@@ -411,7 +412,10 @@ class NGAutoEncoder(nn.Module):
         if lr_m_d != 0 and old_dec:
             param_groups.append({"params": old_dec, "lr": lr_m_d})
 
-        return AdamW(param_groups)
+        return AdamW(
+            param_groups,
+            weight_decay=float(getattr(self, "neurogenesis_weight_decay", 0.0)),
+        )
 
     @staticmethod
     def _mask_columns_hook(columns: slice):
@@ -458,7 +462,10 @@ class NGAutoEncoder(nn.Module):
                 param_groups.append({"params": dec_plastic, "lr": lr})
 
             if param_groups:
-                opt = AdamW(param_groups, weight_decay=0.0)
+                opt = AdamW(
+                    param_groups,
+                    weight_decay=float(getattr(self, "neurogenesis_weight_decay", 0.0)),
+                )
                 opt._ng_hook_handles = handles  # type: ignore[attr-defined]
                 return opt
 

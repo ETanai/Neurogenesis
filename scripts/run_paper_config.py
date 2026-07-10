@@ -54,6 +54,26 @@ def _ensure_runs(runs: Iterable[dict]) -> list[dict]:
     return run_list
 
 
+def _validate_paper_run(cfg, *, run_name: str) -> None:
+    """Reject paper runs whose resolved replay behavior contradicts their regime."""
+    regime = str(cfg.experiment.get("regime", "")).lower()
+    if regime not in {"cl_ir", "ndl_ir"}:
+        return
+    if not bool(cfg.replay.get("enabled", False)):
+        raise ValueError(f"Paper IR run '{run_name}' resolves with replay disabled.")
+    replay_mode = str(cfg.replay.get("mode", "")).lower()
+    if replay_mode != "intrinsic":
+        raise ValueError(
+            f"Paper IR run '{run_name}' resolves to replay.mode={replay_mode!r}; "
+            "use replay.mode=intrinsic or label it as a dataset-replay control."
+        )
+    if not bool(cfg.replay.get("reuse_previous_stats", False)):
+        raise ValueError(
+            f"Paper IR run '{run_name}' must set replay.reuse_previous_stats=true "
+            "so old original samples are not revisited."
+        )
+
+
 def _make_summary_paths(config_path: Path, timestamp: str) -> tuple[Path, Path, Path]:
     root = (
         Path(__file__).resolve().parents[1]
@@ -144,6 +164,7 @@ def run_from_config(config_path: Path) -> None:
     for rep_idx in range(repetitions):
         seed_value = seeds[rep_idx]
         rep_suffix = f"_rep{rep_idx + 1}" if repetitions > 1 else ""
+        completed_sizes: dict[str, list[int]] = {}
         for run_spec in runs:
             run_name = str(run_spec.get("name", "run"))
             description = run_spec.get("description", run_name)
@@ -152,6 +173,16 @@ def run_from_config(config_path: Path) -> None:
                 raise ValueError(
                     f"Run '{run_name}' in {config_path} must specify Hydra overrides."
                 )
+            control_size_from = run_spec.get("control_size_from")
+            if control_size_from:
+                source_name = str(control_size_from)
+                if source_name not in completed_sizes:
+                    raise ValueError(
+                        f"Run '{run_name}' requires sizes from '{source_name}', but that run "
+                        "has not completed in this repetition. Order the source run first."
+                    )
+                sizes = ",".join(str(size) for size in completed_sizes[source_name])
+                overrides.append(f"experiment.control_hidden_sizes=[{sizes}]")
             mlflow_run_name = f"{run_prefix}_{run_name}{rep_suffix}_{timestamp}"
             overrides.extend(
                 [
@@ -160,6 +191,12 @@ def run_from_config(config_path: Path) -> None:
                 ]
             )
             cfg = _compose_cfg(overrides)
+            if bool(run_spec.get("shuffle_incremental_classes", False)):
+                incremental = [int(cls) for cls in cfg.experiment.incremental_classes]
+                random.Random(seed_value).shuffle(incremental)
+                with open_dict(cfg):
+                    cfg.experiment.incremental_classes = incremental
+            _validate_paper_run(cfg, run_name=run_name)
             with open_dict(cfg):
                 cfg.paper_experiment = f"{config_path.stem}/{run_name}{rep_suffix}"
                 if experiment_name:
@@ -174,7 +211,8 @@ def run_from_config(config_path: Path) -> None:
                     seed=seed_value,
                 )
             )
-            run(cfg)
+            result = run(cfg)
+            completed_sizes[run_name] = [int(size) for size in result["model"].hidden_sizes]
 
     if experiment_name:
         print(f"\n=== Generating summary artifacts for experiment '{experiment_name}' ===")

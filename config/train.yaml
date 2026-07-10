@@ -7,5 +7,6 @@ defaults:
   - neurogenesis: default      # same pattern: add files under config/neurogenesis for extra presets.
   - replay: default            # 'default' is the shipped IR preset; create config/replay/<name>.yaml for others.
   - logging: default           # 'default' enables MLflow; add config/logging/<name>.yaml for alternatives.
+  - _self_
 
 seed: 42                       # base RNG seed for reproducibility

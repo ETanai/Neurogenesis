@@ -16,3 +16,7 @@ runs:
       - experiment=mnist_incremental
       - experiment.regime=ndl
       - replay.enabled=false
+      - neurogenesis.thresholds=null
+      - neurogenesis.objective_mode=paper_level_ae
+      - neurogenesis.next_layer_optimization=paper_columns
+      - neurogenesis.early_stop=null

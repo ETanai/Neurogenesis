@@ -1884,6 +1884,27 @@ def _bootstrap_replay(
     # aggregate timing is logged by caller where logger is available
 
 
+def _replay_refresh_plan(
+    *,
+    replay_mode: str,
+    reuse_previous_stats: bool,
+    learned_so_far: Sequence[int],
+    incoming_class: int,
+) -> tuple[list[int], bool]:
+    """Choose replay loaders without leaking old data into intrinsic replay."""
+    mode = str(replay_mode).lower()
+    if mode == "intrinsic":
+        # Once a class leaves the stream, its original data is unavailable.
+        # Existing latent statistics remain in place; only the incoming class
+        # may be encoded and fitted.
+        return [int(incoming_class)], False
+    if mode == "dataset":
+        if reuse_previous_stats:
+            return [int(incoming_class)], False
+        return [int(cls) for cls in learned_so_far], True
+    raise ValueError(f"Unknown replay mode {replay_mode!r}.")
+
+
 def _pretrain(
     model: NGAutoEncoder, dm: MNISTDataModule, cfg: DictConfig, device: torch.device, logger
 ) -> AutoencoderPretrainer:
@@ -2225,6 +2246,7 @@ def run(cfg: DictConfig) -> None:
                 "max_outlier_fraction_by_level", {}
             ),
             base_lr=cfg.training.base_lr,
+            weight_decay=cfg.training.weight_decay,
             plasticity_epochs=cfg.neurogenesis.plasticity_epochs,
             stability_epochs=cfg.neurogenesis.stability_epochs,
             next_layer_epochs=cfg.neurogenesis.next_layer_epochs,
@@ -2387,14 +2409,19 @@ def run(cfg: DictConfig) -> None:
         if replay is not None:
             t_boot_inc0 = time.perf_counter()
             reuse_previous_stats = bool(cfg.replay.get("reuse_previous_stats", False))
-            replay_update_classes = [class_id] if reuse_previous_stats else learned_so_far
+            replay_update_classes, reset_replay_stats = _replay_refresh_plan(
+                replay_mode=replay_mode,
+                reuse_previous_stats=reuse_previous_stats,
+                learned_so_far=learned_so_far,
+                incoming_class=class_id,
+            )
             _bootstrap_replay(
                 replay,
                 dm,
                 replay_update_classes,
                 batch_size=min(cfg.replay.stats_batch_size, cfg.data.batch_size),
                 num_workers=cfg.data.num_workers,
-                reset_stats=not reuse_previous_stats,
+                reset_stats=reset_replay_stats,
             )
             logger.log_metrics(
                 {"timing/replay_update_sec": time.perf_counter() - t_boot_inc0},
@@ -2403,6 +2430,7 @@ def run(cfg: DictConfig) -> None:
             logger.log_metrics(
                 {
                     "replay/reuse_previous_stats": float(reuse_previous_stats),
+                    "replay/old_data_isolated": float(replay_mode == "intrinsic"),
                     "replay/refit_class_count": float(len(replay_update_classes)),
                 },
                 step=len(learned_so_far),

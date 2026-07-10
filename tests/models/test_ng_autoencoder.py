@@ -236,6 +236,23 @@ def test_neurogenesis_optimizer_lr_ratios(simple_ae):
     assert {group["lr"] for group in stability_opt.param_groups} == {2.0e-3}
 
 
+def test_neurogenesis_optimizers_honor_explicit_weight_decay(simple_ae):
+    simple_ae.add_new_nodes(0, 1)
+    simple_ae.neurogenesis_weight_decay = 0.0
+
+    plasticity = simple_ae._optim_plasticity(level=0, lr=1.0e-3)
+    stability = simple_ae._optim_stability(level=0, lr=1.0e-3)
+
+    assert plasticity.param_groups
+    assert stability.param_groups
+    assert all(group["weight_decay"] == 0.0 for group in plasticity.param_groups)
+    assert all(group["weight_decay"] == 0.0 for group in stability.param_groups)
+
+    simple_ae.neurogenesis_weight_decay = 2.5e-4
+    configured = simple_ae._optim_stability(level=0, lr=1.0e-3)
+    assert all(group["weight_decay"] == 2.5e-4 for group in configured.param_groups)
+
+
 def test_paper_next_layer_optimizer_updates_only_new_columns():
     torch.manual_seed(7)
     ae = NGAutoEncoder(

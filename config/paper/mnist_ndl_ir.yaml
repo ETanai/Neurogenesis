@@ -16,3 +16,11 @@ runs:
       - experiment=mnist_incremental
       - experiment.regime=ndl_ir
       - replay.enabled=true
+      - replay.mode=intrinsic
+      - replay.reuse_previous_stats=true
+      - replay.ir_sampling_mode=gaussian_full
+      - neurogenesis.thresholds=null
+      - neurogenesis.objective_mode=paper_level_ae
+      - neurogenesis.next_layer_optimization=paper_columns
+      - neurogenesis.stability_replay_mode=paper
+      - neurogenesis.early_stop=null

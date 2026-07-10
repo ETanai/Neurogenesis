@@ -4,6 +4,13 @@ This document records the current state of the Neurogenesis Deep Learning
 replication. It replaces an earlier implementation plan whose blockers were
 resolved by later commits.
 
+For a line-by-line comparison of Algorithm 1 with the executed implementation,
+including confirmed deviations and paper ambiguities, see
+`docs/algorithm_fidelity.md`.
+
+The staged clean-replay, intrinsic-replay, MNIST, and SD-19 validation protocol
+is specified in `docs/replication_validation_plan.md`.
+
 ## Implemented
 
 - A rooted, composable Hydra configuration tree (`config/train.yaml`)
