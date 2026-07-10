@@ -36,3 +36,6 @@ extend-select = ["I"]   # isort-style import ordering
 
 [tool.ruff.format]
 docstring-code-format = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

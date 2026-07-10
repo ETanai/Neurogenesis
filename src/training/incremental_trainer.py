@@ -163,7 +163,9 @@ class IncrementalTrainer:
                     continue
                 mean_losses.append(errors.mean().item())
                 max_losses.append(errors.max().item())
-                std_losses.append(errors.std().item())
+                # The population standard deviation is defined for a
+                # one-sample loader and is the useful quantity for evaluation.
+                std_losses.append(errors.std(unbiased=False).item())
         self.ae.train()
         return mean_losses, max_losses, std_losses
 

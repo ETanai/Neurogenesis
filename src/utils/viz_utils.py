@@ -286,9 +286,6 @@ def plot_partial_recon_grid_mlflow(
             )
             fig.add_artist(line)
 
-    # overall left margin so row labels aren't cut off
-    fig.subplots_adjust(left=0.08)
-
     if return_mlflow_artifact:
         buf = io.BytesIO()
         fig.savefig(buf, format="png", bbox_inches="tight")

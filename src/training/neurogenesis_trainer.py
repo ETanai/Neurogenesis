@@ -136,9 +136,14 @@ class NeurogenesisTrainer:
                 "Unknown next_layer_optimization "
                 f"'{next_layer_optimization}'. Expected 'broad' or 'paper_columns'."
             )
-        self.ae.plasticity_decoder_lr_ratio = self.plasticity_decoder_lr_ratio
-        self.ae.stability_lr_ratio = self.stability_lr_ratio
-        self.ae.next_layer_optimization = self.next_layer_optimization
+        # Some integrations construct the controller before the model is
+        # attached (for example, Lightning wrappers and lightweight test
+        # doubles).  Keep construction side-effect free in that case; the real
+        # model receives these settings when it is supplied normally.
+        if self.ae is not None:
+            self.ae.plasticity_decoder_lr_ratio = self.plasticity_decoder_lr_ratio
+            self.ae.stability_lr_ratio = self.stability_lr_ratio
+            self.ae.next_layer_optimization = self.next_layer_optimization
         self.objective_mode = str(objective_mode or "paper_level_ae").lower()
         valid_objective_modes = {
             "paper_level_ae",

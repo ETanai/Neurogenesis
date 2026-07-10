@@ -19,6 +19,8 @@
 !*/mnist.yaml
 !environment.yml
 !.gitignore
+!README.md
+!docs/*.md
 !docs/papers/**
 
 __pycache__/
