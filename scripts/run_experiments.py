@@ -373,7 +373,12 @@ def _prep_device(cfg: DictConfig) -> torch.device:
 
 def _neurogenesis_early_stop_cfg(cfg: DictConfig) -> dict:
     """Bundle base and diagnostic early-stop overrides for the trainer."""
-    early_stop = OmegaConf.to_container(cfg.neurogenesis.early_stop, resolve=True)
+    configured = cfg.neurogenesis.get("early_stop", None)
+    early_stop = (
+        OmegaConf.to_container(configured, resolve=True)
+        if OmegaConf.is_config(configured)
+        else configured
+    )
     early_stop = dict(early_stop or {})
     for key in (
         "early_stop_by_phase",
@@ -1980,6 +1985,142 @@ def _pretrain(
     return trainer
 
 
+def _save_base_checkpoint(model: NGAutoEncoder, path_value: str, cfg: DictConfig) -> Path:
+    path = Path(str(path_value)).expanduser().resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "state_dict": model.state_dict(),
+            "input_dim": int(model.input_dim),
+            "hidden_sizes": [int(size) for size in model.hidden_sizes],
+            "base_classes": [int(cls) for cls in cfg.experiment.base_classes],
+            "seed": int(cfg.seed),
+            "torch_rng_state": torch.get_rng_state(),
+            "cuda_rng_state_all": torch.cuda.get_rng_state_all()
+            if torch.cuda.is_available()
+            else [],
+        },
+        path,
+    )
+    return path
+
+
+def _load_base_checkpoint(model: NGAutoEncoder, path_value: str, cfg: DictConfig) -> Path:
+    path = Path(str(path_value)).expanduser().resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"Base checkpoint does not exist: {path}")
+    payload = torch.load(path, map_location=next(model.parameters()).device, weights_only=True)
+    expected_sizes = [int(size) for size in model.hidden_sizes]
+    stored_sizes = [int(size) for size in payload.get("hidden_sizes", [])]
+    if stored_sizes != expected_sizes:
+        raise ValueError(
+            f"Base checkpoint hidden sizes {stored_sizes} do not match model {expected_sizes}."
+        )
+    expected_classes = [int(cls) for cls in cfg.experiment.base_classes]
+    stored_classes = [int(cls) for cls in payload.get("base_classes", [])]
+    if stored_classes != expected_classes:
+        raise ValueError(
+            f"Base checkpoint classes {stored_classes} do not match experiment {expected_classes}."
+        )
+    model.load_state_dict(payload["state_dict"], strict=True)
+    rng_state = payload.get("torch_rng_state")
+    if rng_state is not None:
+        torch.set_rng_state(rng_state.cpu())
+    cuda_states = payload.get("cuda_rng_state_all") or []
+    if cuda_states and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all([state.cpu() for state in cuda_states])
+    return path
+
+
+def _cpu_tree(value):
+    """Copy a nested checkpoint payload to CPU without changing its structure."""
+    if torch.is_tensor(value):
+        return value.detach().cpu()
+    if isinstance(value, dict):
+        return {key: _cpu_tree(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_cpu_tree(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_cpu_tree(item) for item in value)
+    return value
+
+
+def _read_incremental_checkpoint(path_value: str, cfg: DictConfig) -> tuple[Path, dict]:
+    path = Path(str(path_value)).expanduser().resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"Incremental checkpoint does not exist: {path}")
+    payload = torch.load(path, map_location="cpu", weights_only=True)
+    expected_base = [int(cls) for cls in cfg.experiment.base_classes]
+    if [int(cls) for cls in payload.get("base_classes", [])] != expected_base:
+        raise ValueError("Incremental checkpoint base classes do not match the experiment.")
+    configured = expected_base + [int(cls) for cls in cfg.experiment.incremental_classes]
+    learned = [int(cls) for cls in payload.get("learned", [])]
+    if learned != configured[: len(learned)]:
+        raise ValueError(
+            "Incremental checkpoint learned classes are not a prefix of the configured stream: "
+            f"learned={learned}, configured={configured}."
+        )
+    if len(learned) < len(expected_base):
+        raise ValueError("Incremental checkpoint does not include all base classes.")
+    return path, payload
+
+
+def _restore_rng(payload: dict) -> None:
+    rng_state = payload.get("torch_rng_state")
+    if rng_state is not None:
+        torch.set_rng_state(rng_state.cpu())
+    cuda_states = payload.get("cuda_rng_state_all") or []
+    if cuda_states and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all([state.cpu() for state in cuda_states])
+
+
+def _save_incremental_checkpoint(
+    model: NGAutoEncoder,
+    replay,
+    learned: Sequence[int],
+    thresholds: Sequence[float],
+    eval_records: list[dict],
+    training_stats: dict,
+    path_value: str,
+    cfg: DictConfig,
+) -> Path:
+    # The next class begins by promoting every plastic node. Doing it here is
+    # function-preserving and lets a resumed model be rebuilt from layer sizes.
+    model._plastic_to_mature()
+    path = Path(str(path_value)).expanduser().resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    replay_payload = None
+    if replay is not None:
+        replay_payload = {
+            "stats": _cpu_tree(replay.stats),
+            "class_weights": replay.get_class_weights(),
+        }
+    payload = {
+        "format_version": 1,
+        "state_dict": _cpu_tree(model.state_dict()),
+        "input_dim": int(model.input_dim),
+        "hidden_sizes": [int(size) for size in model.hidden_sizes],
+        "base_classes": [int(cls) for cls in cfg.experiment.base_classes],
+        "incremental_classes": [int(cls) for cls in cfg.experiment.incremental_classes],
+        "learned": [int(cls) for cls in learned],
+        "thresholds": [float(value) for value in thresholds],
+        "eval_records": eval_records,
+        "training_stats": dict(training_stats),
+        "model_update_steps": int(getattr(model, "update_steps", 0)),
+        "replay_mode": str(cfg.replay.get("mode", "intrinsic")).lower(),
+        "replay": replay_payload,
+        "seed": int(cfg.seed),
+        "torch_rng_state": torch.get_rng_state(),
+        "cuda_rng_state_all": torch.cuda.get_rng_state_all()
+        if torch.cuda.is_available()
+        else [],
+    }
+    tmp = path.with_name(path.name + ".tmp")
+    torch.save(payload, tmp)
+    tmp.replace(path)
+    return path
+
+
 def _evaluate(
     trainer: NeurogenesisTrainer | IncrementalTrainer,
     dm: MNISTDataModule,
@@ -2083,12 +2224,31 @@ def run(cfg: DictConfig) -> None:
     _apply_experiment_model_overrides(cfg)
     _apply_control_model_overrides(cfg)
 
+    resume_path = None
+    resume_payload = None
+    incremental_checkpoint_in = cfg.training.get("incremental_checkpoint", None)
+    if incremental_checkpoint_in:
+        resume_path, resume_payload = _read_incremental_checkpoint(
+            incremental_checkpoint_in, cfg
+        )
+        stored_input_dim = int(resume_payload.get("input_dim", cfg.model.input_dim))
+        if stored_input_dim != int(cfg.model.input_dim):
+            raise ValueError(
+                f"Incremental checkpoint input dimension {stored_input_dim} does not "
+                f"match model {int(cfg.model.input_dim)}."
+            )
+        cfg.model.hidden_sizes = [
+            int(size) for size in resume_payload.get("hidden_sizes", [])
+        ]
+
     training_stats = {
         "pretrain_parameter_updates": 0,
         "neurogenesis_parameter_updates": 0,
         "incremental_parameter_updates": 0,
         "total_parameter_updates": 0,
     }
+    if resume_payload is not None:
+        training_stats.update(resume_payload.get("training_stats", {}))
 
     dm = _instantiate_datamodule(cfg.data, cfg.model)
     view_shape = _infer_view_shape(dm)
@@ -2130,10 +2290,28 @@ def run(cfg: DictConfig) -> None:
     model = _build_model(cfg, device)
 
     t_pre0 = time.perf_counter()
-    pretrainer = _pretrain(model, dm, cfg, device, logger)
+    checkpoint_in = cfg.training.get("base_checkpoint", None)
+    if resume_payload is not None:
+        model.load_state_dict(resume_payload["state_dict"], strict=True)
+        model.update_steps = int(resume_payload.get("model_update_steps", 0))
+        logger.log_metrics({"config/incremental_checkpoint_loaded": 1.0}, step=0)
+        logger.log_text(str(resume_path), "config/incremental_checkpoint.txt")
+        pretrainer = None
+    elif checkpoint_in:
+        loaded_path = _load_base_checkpoint(model, checkpoint_in, cfg)
+        logger.log_metrics({"config/base_checkpoint_loaded": 1.0}, step=0)
+        logger.log_text(str(loaded_path), "config/base_checkpoint.txt")
+        pretrainer = None
+    else:
+        pretrainer = _pretrain(model, dm, cfg, device, logger)
+        checkpoint_out = cfg.training.get("base_checkpoint_out", None)
+        if checkpoint_out:
+            saved_path = _save_base_checkpoint(model, checkpoint_out, cfg)
+            logger.log_text(str(saved_path), "config/base_checkpoint.txt")
     logger.log_metrics({"timing/pretrain_sec": time.perf_counter() - t_pre0})
     training_stats["pretrain_parameter_updates"] = getattr(pretrainer, "update_steps", 0)
-    model.reset_update_counter()
+    if resume_payload is None:
+        model.reset_update_counter()
 
     replay_mode = str(cfg.replay.get("mode", "intrinsic")).lower()
     use_neurogenesis, regime_replay = _resolve_regime(cfg)
@@ -2150,7 +2328,9 @@ def run(cfg: DictConfig) -> None:
         except Exception:
             manual_thresholds = None
 
-        if manual_thresholds is not None:
+        if resume_payload is not None:
+            thresholds = [float(v) for v in resume_payload.get("thresholds", [])]
+        elif manual_thresholds is not None:
             thresholds = [float(v) for v in list(manual_thresholds)]
         else:
             threshold_subset = _get_combined_dataset(dm, cfg.experiment.base_classes, split="train")
@@ -2205,14 +2385,35 @@ def run(cfg: DictConfig) -> None:
                 f"Unknown replay.mode '{cfg.replay.get('mode')}'. Expected 'intrinsic' or 'dataset'."
             )
         t_boot0 = time.perf_counter()
-        _bootstrap_replay(
-            replay,
-            dm,
-            cfg.experiment.base_classes,
-            batch_size=min(cfg.replay.stats_batch_size, cfg.data.batch_size),
-            num_workers=cfg.data.num_workers,
-            reset_stats=True,
-        )
+        if resume_payload is not None:
+            stored_mode = str(resume_payload.get("replay_mode", replay_mode)).lower()
+            if stored_mode != replay_mode:
+                raise ValueError(
+                    f"Incremental checkpoint replay mode {stored_mode!r} does not match "
+                    f"configured mode {replay_mode!r}."
+                )
+            replay_payload = resume_payload.get("replay") or {}
+            replay.stats = _cpu_tree(replay_payload.get("stats", {}))
+            if isinstance(replay, IntrinsicReplay):
+                replay.stats = {
+                    int(cls): _cpu_tree(stats)
+                    for cls, stats in replay.stats.items()
+                }
+                for stats in replay.stats.values():
+                    for key, value in list(stats.items()):
+                        if torch.is_tensor(value):
+                            stats[key] = value.to(device)
+                replay.sync_encoder_latent_dim()
+            replay.set_class_weights(replay_payload.get("class_weights", {}))
+        else:
+            _bootstrap_replay(
+                replay,
+                dm,
+                cfg.experiment.base_classes,
+                batch_size=min(cfg.replay.stats_batch_size, cfg.data.batch_size),
+                num_workers=cfg.data.num_workers,
+                reset_stats=True,
+            )
         logger.log_metrics(
             {"timing/replay_bootstrap_sec": time.perf_counter() - t_boot0},
             step=len(cfg.experiment.base_classes),
@@ -2236,6 +2437,8 @@ def run(cfg: DictConfig) -> None:
             ir=replay,
             thresholds=thresholds,
             max_nodes=list(cfg.neurogenesis.max_nodes),
+            max_nodes_scope=cfg.neurogenesis.get("max_nodes_scope", "per_class"),
+            initial_hidden_sizes=list(cfg.model.hidden_sizes),
             max_outliers=cfg.neurogenesis.get(
                 "max_outliers", None
             )
@@ -2337,39 +2540,54 @@ def run(cfg: DictConfig) -> None:
             logger=logger,
         )
 
-    learned: list[int] = list(cfg.experiment.base_classes)
+    learned: list[int] = (
+        [int(cls) for cls in resume_payload.get("learned", [])]
+        if resume_payload is not None
+        else list(cfg.experiment.base_classes)
+    )
     configured_incremental_classes = list(cfg.experiment.incremental_classes)
     incremental_classes = (
         []
         if bool(cfg.experiment.get("skip_incremental_training", False))
         else configured_incremental_classes
     )
+    if resume_payload is not None:
+        completed_incremental = len(learned) - len(cfg.experiment.base_classes)
+        incremental_classes = incremental_classes[completed_incremental:]
     all_classes: list[int] = list(cfg.experiment.base_classes) + configured_incremental_classes
     trainer.log_global_sizes()
-    eval_records: list[dict] = []
-    eval_records.extend(_evaluate(trainer, dm, learned, cfg, step=len(learned), logger=logger))
-    base_stage_label = f"Step {len(learned)} (base)"
-    _log_reconstruction_artifacts(
-        model,
-        dm,
-        all_classes,
-        len(learned),
-        device,
-        logger,
-        step=len(learned),
-        timeline_records=recon_timeline_records,
-        stage_label=base_stage_label,
+    trainer._class_count = max(0, len(learned) - len(cfg.experiment.base_classes))
+    eval_records: list[dict] = (
+        list(resume_payload.get("eval_records", []))
+        if resume_payload is not None
+        else []
     )
-    _log_intrinsic_replay_examples(
-        replay,
-        classes=learned,
-        view_shape=view_shape,
-        logger=logger,
-        step=len(learned),
-        samples_per_class=ir_samples_per_class,
-        timeline_records=ir_timeline_records,
-        stage_label=base_stage_label,
-    )
+    if resume_payload is None:
+        eval_records.extend(_evaluate(trainer, dm, learned, cfg, step=len(learned), logger=logger))
+        base_stage_label = f"Step {len(learned)} (base)"
+        _log_reconstruction_artifacts(
+            model,
+            dm,
+            all_classes,
+            len(learned),
+            device,
+            logger,
+            step=len(learned),
+            timeline_records=recon_timeline_records,
+            stage_label=base_stage_label,
+        )
+        _log_intrinsic_replay_examples(
+            replay,
+            classes=learned,
+            view_shape=view_shape,
+            logger=logger,
+            step=len(learned),
+            samples_per_class=ir_samples_per_class,
+            timeline_records=ir_timeline_records,
+            stage_label=base_stage_label,
+        )
+    else:
+        _restore_rng(resume_payload)
 
     train_limit_per_class = cfg.experiment.get("incremental_train_limit_per_class", None)
     for stage, class_id in enumerate(incremental_classes, start=1):
@@ -2474,6 +2692,19 @@ def run(cfg: DictConfig) -> None:
             timeline_records=ir_timeline_records,
             stage_label=f"Step {len(learned)} (added {class_id})",
         )
+        checkpoint_out = cfg.training.get("incremental_checkpoint_out", None)
+        if checkpoint_out:
+            saved_path = _save_incremental_checkpoint(
+                model,
+                replay,
+                learned,
+                thresholds,
+                eval_records,
+                training_stats,
+                checkpoint_out,
+                cfg,
+            )
+            logger.log_text(str(saved_path), "config/incremental_checkpoint.txt")
 
     if use_neurogenesis:
         training_stats["neurogenesis_parameter_updates"] = getattr(model, "update_steps", 0)

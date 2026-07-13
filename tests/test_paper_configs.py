@@ -4,7 +4,7 @@ import pytest
 from omegaconf import OmegaConf
 
 from scripts.run_paper_config import _compose_cfg, _validate_paper_run
-from scripts.run_experiments import _replay_refresh_plan
+from scripts.run_experiments import _neurogenesis_early_stop_cfg, _replay_refresh_plan
 
 
 PAPER_DIR = Path(__file__).resolve().parents[1] / "config" / "paper"
@@ -116,3 +116,15 @@ def test_dataset_refresh_keeps_clean_replay_upper_bound():
 
     assert classes == [1, 7, 0]
     assert reset is True
+
+
+def test_paper_run_accepts_disabled_phase_early_stopping():
+    cfg = _compose_cfg(
+        [
+            "data=mnist",
+            "experiment=mnist_incremental",
+            "neurogenesis.early_stop=null",
+        ]
+    )
+
+    assert _neurogenesis_early_stop_cfg(cfg) == {}

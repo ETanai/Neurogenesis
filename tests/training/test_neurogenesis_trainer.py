@@ -393,6 +393,44 @@ def test_absolute_growth_request_respects_remaining_max_nodes():
     assert request["remaining_new_nodes_before_growth"] == 1
 
 
+def test_global_growth_budget_uses_growth_since_initial_architecture():
+    ae = DummyAE(hidden_sizes=[24])
+    trainer = NeurogenesisTrainer(
+        ae,
+        ir=None,
+        thresholds=[0.5],
+        max_nodes=[5],
+        max_nodes_scope="global",
+        initial_hidden_sizes=[20],
+        max_outliers=1,
+        factor_max_new_nodes=1.0,
+        growth_mode="absolute",
+        absolute_new_nodes=3,
+    )
+
+    request = trainer._growth_request(
+        level=0, n_outliers=200, nodes_existing=24, n_plastic_neurons=0
+    )
+
+    assert request["remaining_new_nodes_before_growth"] == 1
+    assert request["actual_new_nodes"] == 1
+
+
+def test_global_growth_budget_is_exhausted_after_resume_size_reaches_cap():
+    ae = DummyAE(hidden_sizes=[25])
+    trainer = NeurogenesisTrainer(
+        ae,
+        ir=None,
+        thresholds=[0.5],
+        max_nodes=[5],
+        max_nodes_scope="global",
+        initial_hidden_sizes=[20],
+        max_outliers=1,
+    )
+
+    assert trainer._growth_budget_remaining(0) == 0
+
+
 def test_growth_mode_by_level_overrides_global_mode():
     ae = DummyAE(hidden_sizes=[20, 20, 20, 20])
     trainer = NeurogenesisTrainer(

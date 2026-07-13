@@ -10,3 +10,7 @@ device: auto               # torch.device string; auto|cpu|cuda|cuda:0|mps are t
 validate: true             # run validation after each epoch
 incremental_epochs: 5      # epochs spent learning each incremental class batch
 log_pretrain_thresholds: true  # log per-epoch threshold estimates during pretraining
+base_checkpoint: null      # optional pretrained NGAutoEncoder checkpoint to load
+base_checkpoint_out: null  # optional path where a newly pretrained base model is saved
+incremental_checkpoint: null      # optional completed-class checkpoint to resume
+incremental_checkpoint_out: null  # atomically overwritten after every completed class

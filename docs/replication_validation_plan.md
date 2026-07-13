@@ -6,6 +6,11 @@ clean dataset replay before intrinsic replay: failure with original historical
 samples identifies a training or growth problem that generated replay cannot
 be expected to solve.
 
+The variable-level boundary between paper-compatible tuning and explicit
+non-paper ablations is defined in `docs/performance_tuning_variables.md`.
+The iterative congruency audit, sensitivity screen, optimization loop, and
+promotion rules are defined in `docs/paper_compatible_optimization_plan.md`.
+
 The paper provides plots and qualitative comparisons but few machine-readable
 numbers. The primary replication target is therefore the ordering and shape of
 the published effects, accompanied by transparent implementation metrics. This
@@ -355,6 +360,20 @@ not silently omit failed seeds.
    class-order sensitivity.
 6. All stages succeed -> publish confirmatory artifacts and state which claims
    are reproduced, contradicted, or unresolved.
+
+## Current decision-tree position (2026-07-12)
+
+The completed screening campaign is at branch 4: original-data replay succeeds
+through the full MNIST curriculum, while the literal full-covariance Gaussian
+IR candidate fails its matched no-replay comparison. On seeds 42--44, clean
+replay improves macro validation MSE over no replay in `3/3` cases; Gaussian
+IR at replay ratio `0.5` degrades it in `3/3` cases. Exact values and the frozen
+configuration are recorded in
+`docs/paper_compatible_optimization_plan.md`.
+
+This evidence rejects promotion of the tested IR candidate. It does not satisfy
+the five-seed IR gate, capacity-matched CL comparison, ten-seed confirmation,
+or SD-19 stages, and therefore is not a numerical replication claim.
 
 ## Recommended execution order
 

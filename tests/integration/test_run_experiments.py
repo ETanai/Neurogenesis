@@ -111,6 +111,91 @@ def test_cl_control_hidden_sizes_override_experiment_model():
     assert result["trainer"].replay_per_class_ratio == 0.5
 
 
+def test_base_checkpoint_round_trip(tmp_path):
+    checkpoint = tmp_path / "base.pt"
+    first = make_toy_cfg()
+    first.experiment.skip_incremental_training = True
+    first.training.base_checkpoint_out = str(checkpoint)
+
+    trained = run(first)
+    assert checkpoint.is_file()
+
+    loaded_cfg = make_toy_cfg()
+    loaded_cfg.experiment.skip_incremental_training = True
+    loaded_cfg.training.base_checkpoint = str(checkpoint)
+    loaded = run(loaded_cfg)
+
+    assert loaded["training_stats"]["pretrain_parameter_updates"] == 0
+    for expected, actual in zip(
+        trained["model"].state_dict().values(), loaded["model"].state_dict().values()
+    ):
+        torch.testing.assert_close(actual, expected)
+
+
+def test_base_checkpoint_restores_rng_for_identical_incremental_run(tmp_path):
+    checkpoint = tmp_path / "base_rng.pt"
+    uninterrupted_cfg = make_toy_cfg()
+    uninterrupted_cfg.training.base_checkpoint_out = str(checkpoint)
+    uninterrupted = run(uninterrupted_cfg)
+
+    resumed_cfg = make_toy_cfg()
+    resumed_cfg.training.base_checkpoint = str(checkpoint)
+    resumed = run(resumed_cfg)
+
+    assert uninterrupted["model"].hidden_sizes == resumed["model"].hidden_sizes
+    for expected, actual in zip(
+        uninterrupted["model"].state_dict().values(), resumed["model"].state_dict().values()
+    ):
+        torch.testing.assert_close(actual, expected)
+
+
+def test_incremental_checkpoint_resumes_at_completed_class_boundary(tmp_path):
+    checkpoint = tmp_path / "incremental.pt"
+
+    first_cfg = make_toy_cfg()
+    first_cfg.training.incremental_checkpoint_out = str(checkpoint)
+    first = run(first_cfg)
+    assert checkpoint.is_file()
+
+    resumed_cfg = make_toy_cfg()
+    resumed_cfg.experiment.incremental_classes = [1, 2]
+    resumed_cfg.training.incremental_checkpoint = str(checkpoint)
+    resumed_cfg.training.incremental_checkpoint_out = str(checkpoint)
+    resumed = run(resumed_cfg)
+
+    uninterrupted_cfg = make_toy_cfg()
+    uninterrupted_cfg.experiment.incremental_classes = [1, 2]
+    uninterrupted = run(uninterrupted_cfg)
+
+    assert resumed["trainer"]._class_count == 2
+    assert set(resumed["replay"].available_classes()) == {0, 1, 2}
+    assert resumed["model"].hidden_sizes[0] >= first["model"].hidden_sizes[0]
+
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    assert payload["learned"] == [0, 1, 2]
+    assert payload["hidden_sizes"] == resumed["model"].hidden_sizes
+    assert payload["eval_records"]
+    assert resumed["model"].hidden_sizes == uninterrupted["model"].hidden_sizes
+    for expected, actual in zip(
+        uninterrupted["model"].state_dict().values(),
+        resumed["model"].state_dict().values(),
+    ):
+        torch.testing.assert_close(actual, expected)
+
+
+def test_incremental_checkpoint_rejects_non_prefix_stream(tmp_path):
+    checkpoint = tmp_path / "incremental.pt"
+    first_cfg = make_toy_cfg()
+    first_cfg.training.incremental_checkpoint_out = str(checkpoint)
+    run(first_cfg)
+
+    bad_cfg = make_toy_cfg()
+    bad_cfg.experiment.incremental_classes = [2]
+    bad_cfg.training.incremental_checkpoint = str(checkpoint)
+    with pytest.raises(ValueError, match="not a prefix"):
+        run(bad_cfg)
+
+
 def test_toy_run_logs_ir_quality_artifact(tmp_path):
     mlflow = pytest.importorskip("mlflow")
     from mlflow.tracking import MlflowClient

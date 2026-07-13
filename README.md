@@ -100,7 +100,11 @@ class ordering, hardware, and random seeds. See
 `docs/replication_gap_analysis.md` for the current verification status and
 `docs/algorithm_fidelity.md` for the operation-level paper-to-code audit. The
 staged experiments, promotion gates, and confirmatory comparisons are defined
-in `docs/replication_validation_plan.md`.
+in `docs/replication_validation_plan.md`. Tunable variables are divided into
+paper-compatible undocumented details and explicit deviations in
+`docs/performance_tuning_variables.md`. The iterative paper-compatible search
+and renewed congruency audit are specified in
+`docs/paper_compatible_optimization_plan.md`.
 
 No software license is currently declared. Copyright permission for the paper
 source and permission to use or redistribute the code should be evaluated

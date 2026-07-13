@@ -51,6 +51,21 @@ growth behavior. The fidelity issue is therefore not the existence of dataset
 replay; it is using or labeling dataset replay as though it were the paper's
 intrinsic-replay condition.
 
+### MaxNodes scope ambiguity
+
+**Status: explicit and under empirical validation.** The trainer supports
+`max_nodes_scope: per_class` (the historical behavior) and `global` (a
+cumulative allowance across the stream). Global remaining capacity is derived
+from current model width minus the configured initial architecture, so it is
+preserved exactly across incremental-checkpoint resume.
+
+Algorithm 1 resets `NewNodes` for each processed class, which suggests a
+class-local allowance, but the paper does not explicitly state the lifetime of
+`MaxNodes`. Figure 4F's final widths are close to applying the reported growth
+allowance only once across the stream. This is therefore an undocumented-detail
+ablation, not yet a claimed correction; reconstruction and retention results,
+not visual architecture matching, determine promotion.
+
 ### 1. Implicit AdamW weight decay
 
 **Status: resolved.** Neurogenesis optimizers now receive the configured weight
@@ -270,6 +285,16 @@ Focused tests confirm that:
 
 These are behavioral conformance tests. They do not demonstrate numerical
 reproduction of published experiments.
+
+The 2026-07-12 screening campaign adds empirical evidence without changing
+that qualification. With cumulative global `MaxNodes` allowances, three
+original-data replay runs converged to `[225,135,83,40]` with macro validation
+MSE `0.04113 +/- 0.00479`. In three matched seeds, original-data replay beat no
+replay every time, but literal full-covariance Gaussian IR at ratio `0.5` was
+worse than no replay every time. The growth/training path therefore passes the
+clean replay control, while the tested intrinsic-replay path does not reproduce
+the paper-reported benefit. See `docs/paper_compatible_optimization_plan.md`
+for the complete screening table and limitations.
 
 ## Criteria for claiming faithful replication
 

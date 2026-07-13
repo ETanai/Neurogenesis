@@ -26,6 +26,8 @@ class NeurogenesisTrainer:
         thresholds: List[float],
         max_nodes: List[int],
         max_outliers: float,
+        max_nodes_scope: str = "per_class",
+        initial_hidden_sizes: List[int] | None = None,
         base_lr: float = 1e-3,
         weight_decay: float = 0.0,
         plasticity_epochs: int = 5,
@@ -77,6 +79,18 @@ class NeurogenesisTrainer:
         self.ir = ir
         self.thresholds = thresholds
         self.max_nodes = max_nodes
+        self.max_nodes_scope = str(max_nodes_scope or "per_class").lower()
+        if self.max_nodes_scope not in {"per_class", "global"}:
+            raise ValueError(
+                f"Unknown max_nodes_scope {max_nodes_scope!r}. Expected 'per_class' or 'global'."
+            )
+        if initial_hidden_sizes is None and ae is not None:
+            initial_hidden_sizes = list(ae.hidden_sizes)
+        self.initial_hidden_sizes = [int(value) for value in (initial_hidden_sizes or [])]
+        if self.max_nodes_scope == "global" and len(self.initial_hidden_sizes) != len(max_nodes):
+            raise ValueError(
+                "global max_nodes_scope requires one initial_hidden_sizes entry per level"
+            )
         self.max_outliers = max_outliers
         self.max_outliers_by_level = self._plain_mapping(max_outliers_by_level or {})
         self.max_outlier_fraction_by_level = self._plain_mapping(
@@ -726,7 +740,7 @@ class NeurogenesisTrainer:
             if requested_raw > 0:
                 requested = max(1, int(math.ceil(requested_raw * growth_scale)))
         per_round_cap = int(math.ceil(factor_max * int(nodes_existing)))
-        remaining = int(self.max_nodes[level]) - int(n_plastic_neurons)
+        remaining = self._growth_budget_remaining(level, n_plastic_neurons)
         actual = int(min(requested, per_round_cap, remaining))
         return {
             "growth_mode": mode,
@@ -740,6 +754,14 @@ class NeurogenesisTrainer:
             "per_round_cap": per_round_cap,
             **shape_info,
         }
+
+    def _growth_budget_remaining(self, level: int, n_plastic_neurons: int = 0) -> int:
+        """Return unspent growth capacity for a class-local or stream-global budget."""
+        if self.max_nodes_scope == "global":
+            current = int(self.ae.hidden_sizes[level])
+            consumed = max(current - int(self.initial_hidden_sizes[level]), 0)
+            return max(int(self.max_nodes[level]) - consumed, 0)
+        return max(int(self.max_nodes[level]) - int(n_plastic_neurons), 0)
 
     def _shape_pressure(self, level: int) -> dict[str, Any]:
         """Return soft funnel-shape pressure for a growth decision."""
@@ -1633,7 +1655,7 @@ class NeurogenesisTrainer:
                     {f"class_{class_id}/growth_level_{level}": self.ae.hidden_sizes[level]},
                     step=added,
                 )
-            max_new_nodes = int(self.max_nodes[level])
+            max_new_nodes = self._growth_budget_remaining(level)
             pbar_growth = tqdm(
                 range(max_new_nodes), desc=f"  Level {level} Growth", unit="rnd", leave=False
             )

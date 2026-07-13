@@ -71,6 +71,7 @@ next_layer_optimization: broad     # broad or paper_columns; paper_columns train
 
 factor_max_new_nodes: 0.2      # fraction of max_nodes eligible for creation
 factor_new_nodes: 0.01         # actual fraction of nodes to add per cycle
+max_nodes_scope: per_class     # per_class, or global across the full class stream
 growth_mode: proportional      # proportional or absolute
 growth_mode_by_level: {}       # optional per-level override, e.g. {3: absolute}
 absolute_new_nodes: 1          # fixed nodes per round when growth_mode is absolute
