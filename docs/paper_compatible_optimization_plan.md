@@ -214,6 +214,78 @@ allowance for every class produced full-stream architectures around
 agreement alone is not a promotion criterion, but this order-of-magnitude deep
 growth difference makes scope a performance-critical undocumented detail.
 
+### 2D. Organic-shape and cap-invariance study
+
+The current cumulative-cap configuration is a cap-driven reference, not
+evidence that the final architecture emerged from demand. With initial widths
+`[200,100,75,20]` and allowances `[25,35,8,20]`, exhausting every allowance
+forces `[225,135,83,40]`, independently of whether that capacity is optimal.
+In the completed runs, most capacity was consumed on digit 0, the remaining
+level-2 allowance was consumed on digit 2, and no parameters changed for later
+digits. The approximate agreement with Figure 4F must therefore not be scored
+as organic growth.
+
+Run the following paired clean-replay conditions with shape pressure disabled.
+The maximum is only an emergency ceiling; it must not be used as a desired
+width.
+
+| Family | New nodes per round | Growth allowance | Purpose |
+| --- | --- | --- | --- |
+| Current cap-driven reference | proportional `0.01` | cumulative `[25,35,8,20]` | Reproduce the current result and measure cap saturation |
+| Fine-grained cumulative | absolute `1`, `2`; proportional `0.0005` | cumulative `2x` and `4x` current allowances | Test whether small growth steps stop before a loose ceiling |
+| Small class-local throttle | absolute `1`, `2` | per-class `[4,5,2,3]` and `[8,10,4,6]` | Permit later classes to request capacity without allowing one class to cause explosive growth |
+| Loose ceiling plus class throttle | absolute `1`, `2` | cumulative `4x`, with per-class throttles above | Separate the stream-wide safety ceiling from the amount one class may consume |
+
+For the fine-grained families, test threshold percentiles `0.985` and `0.995`
+and accepted outlier fractions `0.10` and `0.20`. Keep the local objective,
+paper learning-rate ratios, replay contents, initial architecture, and all other
+paper-locked mechanisms fixed. Do not use an explicit monotonic-width rule,
+layer-ratio target, architecture loss, or a rule preventing a deeper layer from
+becoming wider than its predecessor.
+
+Use paired seeds `42`, `43`, and `44` for `[0,2,3]`, then promote at most three
+families to the full digit stream. Confirm the winner on five seeds and at
+least five shuffled incremental class orders. Always retain the published
+class order as the primary comparison.
+
+Record after every incoming class and level:
+
+- width before and after training, nodes requested/accepted, and cap
+  utilization;
+- pre/post incoming-class MSE, outlier fraction, and exact stopping reason;
+- parameter-update count and norm, including an assertion that later classes
+  did not silently receive zero updates;
+- macro-MSE, foreground-weighted MSE, per-class forgetting, parameter count,
+  runtime, and marginal validation gain per added node;
+- monotonic-width violations and distance from the approximate paper endpoint
+  `[225,135,84,40]`, reported only after performance-based selection.
+
+An architecture is considered demand-emergent only if all of these hold:
+
+1. At least 80% of level/class growth loops stop at the accepted outlier quota,
+   rather than a cap or a round limit.
+2. Doubling the loose cumulative ceiling changes each final layer's added width
+   by at most 10% and changes macro-MSE by at most 5%.
+3. At least half of the incremental classes cause a measurable parameter update
+   in two of three screening seeds; growth is not exhausted by digits 0 and 2.
+4. The same qualitative funnel appears in at least four of five confirmatory
+   seeds and most shuffled orders with no shape pressure.
+5. It matches or improves the cap-driven reference on paired macro-MSE and
+   forgetting, or stays within 5% while using at least 15% fewer added
+   parameters or optimizer updates.
+
+The approximate paper endpoint and the absence of a level-4-over-level-3
+inversion are secondary morphology checks. A candidate that resembles the
+paper only because it exhausts its allowance fails this study. If no candidate
+passes, report that the implementation does not currently recover the paper's
+shape organically; do not silently restore the current allowances as if they
+were learned.
+
+The implemented runner is `scripts/run_organic_growth_ablation.py`. Its
+`screen`, `invariance`, and `full` stages retain original-data replay and emit
+the persistent class reports needed by these gates. Run `--stage all` when
+paired cap-invariance annotations should be computed in one output set.
+
 ## Relevance decision rule
 
 A variable is relevant if, across three paired seeds, at least one tested value:
@@ -357,17 +429,26 @@ Each candidate must record:
 ## Recommended first iteration
 
 The next runs should keep the best screened base settings (`LR=1e-3`, 50
-epochs/level, dropout `0.1`) and dataset replay, then test:
+epochs/level, dropout `0.1`) and dataset replay, then proceed in this order:
 
-1. Stability epochs `100`, `250`, `500`, `1000` at LR/100.
-2. For the best stability duration, next-level LR ratio `0.01`, `0.03`, `0.1`,
-   `1.0`.
-3. For the best schedule, level-2 cap `8`, `16`, `32` and threshold percentile
-   `0.975`, `0.985`, `0.995`.
-4. Repeat the promoted candidate for three paired seeds.
-
-Only after those runs pass the clean-replay gate should the intrinsic-replay
-epsilon/sample-count ablation begin.
+1. Fix the run evidence: persist per-class architecture, parameter deltas,
+   update counts, stopping reasons, and a `cap exhausted with unresolved
+   outliers` flag. Fail a paper run when unresolved outliers coexist with zero
+   possible updates.
+2. Reproduce the current cumulative-cap reference on seeds 42--44 and verify
+   the observed early capacity exhaustion.
+3. Run the Phase 2D `[0,2,3]` organic-shape screen. Start with absolute `1` and
+   `2`, small class-local allowances `[4,5,2,3]`, loose cumulative ceilings at
+   `2x` and `4x`, and percentiles `0.985`/`0.995`.
+4. Run the explicit cap-invariance pair for each promoted candidate by doubling
+   only its stream-wide ceiling. Reject candidates whose shape tracks the cap.
+5. Compare promoted organic candidates to the current reference over the full
+   curriculum using paired MSE, foreground error, forgetting, update coverage,
+   capacity, and runtime. Select by performance and organicity gates, not
+   endpoint resemblance.
+6. Only after clean replay learns throughout the curriculum, resume schedule
+   screens (stability duration and next-level LR) and then diagnose intrinsic
+   replay.
 
 ## Completed screening campaign (2026-07-12)
 
@@ -428,10 +509,21 @@ assumption.
 The clean-replay and replay-source directions are stable at three-seed
 screening strength: all conditions share the same final architecture, clean
 replay wins every pair, and IR loses every pair. Three seeds remain too few for
-confirmatory statistical evidence. The clean-replay gate against a
+confirmatory statistical evidence. Subsequent trajectory inspection also
+showed that these endpoints do not demonstrate successful learning throughout
+the curriculum: most growth allowances were exhausted on digit 0, the final
+remaining growth occurred by digit 2, and later digits caused no model update.
+The final `[225,135,83,40]` shape is therefore currently cap-driven rather than
+shown to be demand-emergent. The Phase 2D study is required before interpreting
+the layer-growth result.
+
+The clean-replay gate against a
 capacity-matched CL control, five-seed IR gate, ten-seed MNIST confirmation,
 and SD-19 curriculum remain unexecuted. Accordingly, the current result is:
 
-- successful full-curriculum NDL with an original-data replay oracle;
+- a completed full-curriculum evaluation of a model whose updates stop early,
+  with an original-data replay oracle outperforming the matched no-replay run;
 - a three-seed reproducible failure of the tested literal Gaussian IR configuration;
+- no evidence yet that the reported final shape emerged independently of its
+  growth caps;
 - no claim yet that the paper's comparative NDL-versus-CL results replicate.

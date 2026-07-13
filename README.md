@@ -83,6 +83,18 @@ intrinsic replay; a method that fails with original historical samples is not
 expected to be rescued by generated replay samples. Dataset-replay and
 intrinsic-replay results should always be labeled separately.
 
+The organic-growth screen keeps dataset replay and disables shape pressure:
+
+```bash
+python scripts/run_organic_growth_ablation.py --stage screen --seeds 42,43,44
+python scripts/run_organic_growth_ablation.py --stage all --seeds 42,43,44
+```
+
+Use `--dry-run` to inspect the resolved matrix or `--quick` for a smoke test.
+The runner writes JSON, CSV, and Markdown summaries under
+`outputs/ablations/organic_growth/`, including cap-invariance, update-coverage,
+outlier-stop, foreground-MSE, forgetting, capacity, and runtime evidence.
+
 ## Paper source
 
 The original arXiv v2 source bundle is preserved in

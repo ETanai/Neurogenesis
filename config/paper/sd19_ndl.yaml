@@ -22,3 +22,4 @@ runs:
       - neurogenesis.next_layer_optimization=paper_columns
       - neurogenesis.stability_replay_mode=paper
       - neurogenesis.early_stop=null
+      - neurogenesis.unresolved_outlier_action=error

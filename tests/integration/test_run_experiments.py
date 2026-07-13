@@ -94,6 +94,9 @@ def test_run_pipeline_with_toy_data(regime, expect_replay):
 
     assert trainer._class_count == 1
     assert 1 in trainer.history
+    if regime.startswith("ndl"):
+        assert result["growth_reports"][1]["levels"]
+        assert "foreground_mse" in result["eval_records"][-1]
 
 
 def test_cl_control_hidden_sizes_override_experiment_model():
@@ -153,19 +156,23 @@ def test_incremental_checkpoint_resumes_at_completed_class_boundary(tmp_path):
     checkpoint = tmp_path / "incremental.pt"
 
     first_cfg = make_toy_cfg()
+    first_cfg.neurogenesis.thresholds = [0.0, 0.0]
     first_cfg.training.incremental_checkpoint_out = str(checkpoint)
     first = run(first_cfg)
     assert checkpoint.is_file()
 
     resumed_cfg = make_toy_cfg()
+    resumed_cfg.neurogenesis.thresholds = [0.0, 0.0]
     resumed_cfg.experiment.incremental_classes = [1, 2]
     resumed_cfg.training.incremental_checkpoint = str(checkpoint)
     resumed_cfg.training.incremental_checkpoint_out = str(checkpoint)
     resumed = run(resumed_cfg)
 
     uninterrupted_cfg = make_toy_cfg()
+    uninterrupted_cfg.neurogenesis.thresholds = [0.0, 0.0]
     uninterrupted_cfg.experiment.incremental_classes = [1, 2]
     uninterrupted = run(uninterrupted_cfg)
+    uninterrupted["model"]._plastic_to_mature()
 
     assert resumed["trainer"]._class_count == 2
     assert set(resumed["replay"].available_classes()) == {0, 1, 2}
@@ -175,6 +182,8 @@ def test_incremental_checkpoint_resumes_at_completed_class_boundary(tmp_path):
     assert payload["learned"] == [0, 1, 2]
     assert payload["hidden_sizes"] == resumed["model"].hidden_sizes
     assert payload["eval_records"]
+    assert payload["growth_reports"]
+    assert payload["training_stats"]["neurogenesis_parameter_updates"] > 0
     assert resumed["model"].hidden_sizes == uninterrupted["model"].hidden_sizes
     for expected, actual in zip(
         uninterrupted["model"].state_dict().values(),

@@ -128,3 +128,39 @@ def test_paper_run_accepts_disabled_phase_early_stopping():
     )
 
     assert _neurogenesis_early_stop_cfg(cfg) == {}
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "figure4.yaml",
+        "mnist_ndl.yaml",
+        "mnist_ndl_ir.yaml",
+        "sd19_growth_20.yaml",
+        "sd19_ndl.yaml",
+        "sd19_ndl_ir.yaml",
+    ],
+)
+def test_paper_ndl_runs_fail_on_exhausted_unresolved_outliers(filename):
+    found_ndl = False
+    for run_name, cfg in _resolved_runs(filename):
+        if str(cfg.experiment.regime).lower() not in {"ndl", "ndl_ir"}:
+            continue
+        found_ndl = True
+        _validate_paper_run(cfg, run_name=run_name)
+        assert cfg.neurogenesis.unresolved_outlier_action == "error"
+    assert found_ndl
+
+
+def test_paper_validator_rejects_silent_unresolved_outliers():
+    cfg = _compose_cfg(
+        [
+            "data=mnist",
+            "experiment=mnist_incremental",
+            "experiment.regime=ndl",
+            "neurogenesis.unresolved_outlier_action=record",
+        ]
+    )
+
+    with pytest.raises(ValueError, match="unresolved_outlier_action=error"):
+        _validate_paper_run(cfg, run_name="silent_ndl")

@@ -31,6 +31,7 @@ valuable to test, but their results must not be combined under the same label.
 | Reconstruction thresholds | Fixed defaults exist; paper-oriented runs estimate from base data | Percentiles `0.95`, `0.975`, `0.985`, `0.995`; optional additive margin | Lower thresholds trigger more growth; overly strict thresholds cause cap hits | Outlier convergence, growth, validation MSE |
 | `MaxOutliers` | Default allows 10% | Fractions `0.05`, `0.10`, `0.20`, `0.30`, or documented absolute counts | Strict quotas increase growth and training; loose quotas may underfit new classes | Final outlier fraction, MSE, parameter count |
 | `MaxNodes` per level | `[100,100,100,20]`; diagnostic used `[25,35,8,20]` | Small pilot caps followed by higher caps only where needed | Prevents runaway growth but can prematurely terminate learning | Cap-hit rate and marginal MSE per added node |
+| Independent class throttle and stream ceiling | Legacy `MaxNodes` uses one scope at a time | `max_nodes_per_class=[4,5,2,3]` with optional loose `max_nodes_stream`; double the stream ceiling for invariance | Lets later classes request capacity while preventing one class from consuming the full stream budget | Quota-stop fraction, later-class updates, width sensitivity to doubled ceiling |
 | Number of nodes added per round (`Nodes_New`) | Proportional to outlier count | Absolute `1`, `2`, `5`; proportional factors `0.002`, `0.005`, `0.01` | Large additions reduce rounds but can overshoot capacity; small additions are slower and more targeted | MSE/growth Pareto frontier |
 | New-node initialization | Kaiming uniform, zero bias | Kaiming uniform, Xavier, paper-era sigmoid-compatible initialization | Affects early plasticity and whether new nodes receive useful gradients | First-round loss reduction and dead/saturated nodes |
 | Next-layer update interpretation | `paper_columns` for paper presets | `paper_columns` and `broad` as competing interpretations | The paper says to add connections and train the next SHL-AE but does not fully define the trainable subset | Global MSE after propagation, retention |
@@ -108,4 +109,3 @@ Every experiment should include a fidelity field with one of:
 
 If any variable from Table 2 changes, the run cannot be labeled
 `paper_locked_confirmatory`.
-

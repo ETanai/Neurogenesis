@@ -57,6 +57,16 @@ def _ensure_runs(runs: Iterable[dict]) -> list[dict]:
 def _validate_paper_run(cfg, *, run_name: str) -> None:
     """Reject paper runs whose resolved replay behavior contradicts their regime."""
     regime = str(cfg.experiment.get("regime", "")).lower()
+    if regime == "ndl":
+        unresolved_action = str(
+            cfg.neurogenesis.get("unresolved_outlier_action", "record")
+        ).lower()
+        if unresolved_action != "error":
+            raise ValueError(
+                f"Paper NDL run '{run_name}' must set "
+                "neurogenesis.unresolved_outlier_action=error so exhausted "
+                "capacity with unresolved outliers cannot pass silently."
+            )
     if regime not in {"cl_ir", "ndl_ir"}:
         return
     if not bool(cfg.replay.get("enabled", False)):
@@ -72,6 +82,16 @@ def _validate_paper_run(cfg, *, run_name: str) -> None:
             f"Paper IR run '{run_name}' must set replay.reuse_previous_stats=true "
             "so old original samples are not revisited."
         )
+    if regime == "ndl_ir":
+        unresolved_action = str(
+            cfg.neurogenesis.get("unresolved_outlier_action", "record")
+        ).lower()
+        if unresolved_action != "error":
+            raise ValueError(
+                f"Paper NDL run '{run_name}' must set "
+                "neurogenesis.unresolved_outlier_action=error so exhausted "
+                "capacity with unresolved outliers cannot pass silently."
+            )
 
 
 def _make_summary_paths(config_path: Path, timestamp: str) -> tuple[Path, Path, Path]:

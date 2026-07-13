@@ -1,5 +1,6 @@
 import inspect
 import math
+import warnings
 from collections.abc import Mapping
 from typing import Any, Callable, List, Optional
 
@@ -28,6 +29,9 @@ class NeurogenesisTrainer:
         max_outliers: float,
         max_nodes_scope: str = "per_class",
         initial_hidden_sizes: List[int] | None = None,
+        max_nodes_per_class: List[int] | None = None,
+        max_nodes_stream: List[int] | None = None,
+        unresolved_outlier_action: str = "record",
         base_lr: float = 1e-3,
         weight_decay: float = 0.0,
         plasticity_epochs: int = 5,
@@ -90,6 +94,27 @@ class NeurogenesisTrainer:
         if self.max_nodes_scope == "global" and len(self.initial_hidden_sizes) != len(max_nodes):
             raise ValueError(
                 "global max_nodes_scope requires one initial_hidden_sizes entry per level"
+            )
+        self.max_nodes_per_class = self._optional_node_limits(
+            max_nodes_per_class, "max_nodes_per_class", len(max_nodes)
+        )
+        self.max_nodes_stream = self._optional_node_limits(
+            max_nodes_stream, "max_nodes_stream", len(max_nodes)
+        )
+        self._uses_explicit_growth_limits = (
+            self.max_nodes_per_class is not None or self.max_nodes_stream is not None
+        )
+        if self.max_nodes_stream is not None and len(self.initial_hidden_sizes) != len(max_nodes):
+            raise ValueError(
+                "max_nodes_stream requires one initial_hidden_sizes entry per level"
+            )
+        self.unresolved_outlier_action = str(
+            unresolved_outlier_action or "record"
+        ).lower()
+        if self.unresolved_outlier_action not in {"record", "warn", "error"}:
+            raise ValueError(
+                "Unknown unresolved_outlier_action "
+                f"{unresolved_outlier_action!r}. Expected 'record', 'warn', or 'error'."
             )
         self.max_outliers = max_outliers
         self.max_outliers_by_level = self._plain_mapping(max_outliers_by_level or {})
@@ -238,6 +263,23 @@ class NeurogenesisTrainer:
 
         # History: class_id -> {'layer_errors': List[List[Tensor]]}
         self.history: dict[Any, dict[str, List[List[Tensor]]]] = {}
+        # JSON-serializable evidence for architecture growth and per-class updates.
+        self.class_reports: dict[Any, dict[str, Any]] = {}
+
+    @staticmethod
+    def _optional_node_limits(
+        values: List[int] | None, name: str, expected_length: int
+    ) -> list[int] | None:
+        if values is None:
+            return None
+        result = [int(value) for value in values]
+        if len(result) != expected_length:
+            raise ValueError(
+                f"{name} requires {expected_length} entries, received {len(result)}"
+            )
+        if any(value < 0 for value in result):
+            raise ValueError(f"{name} entries must be non-negative")
+        return result
 
     @staticmethod
     def _normalize_outlier_criterion_diagnostics(cfg: Mapping | dict) -> dict[str, Any]:
@@ -740,7 +782,8 @@ class NeurogenesisTrainer:
             if requested_raw > 0:
                 requested = max(1, int(math.ceil(requested_raw * growth_scale)))
         per_round_cap = int(math.ceil(factor_max * int(nodes_existing)))
-        remaining = self._growth_budget_remaining(level, n_plastic_neurons)
+        budget = self._growth_budget_state(level, n_plastic_neurons)
+        remaining = int(budget["remaining"])
         actual = int(min(requested, per_round_cap, remaining))
         return {
             "growth_mode": mode,
@@ -751,17 +794,81 @@ class NeurogenesisTrainer:
             "factor_max_new_nodes_used": factor_max,
             "absolute_new_nodes_used": absolute_new,
             "remaining_new_nodes_before_growth": remaining,
+            "class_remaining_before_growth": budget["class_remaining"],
+            "stream_remaining_before_growth": budget["stream_remaining"],
             "per_round_cap": per_round_cap,
             **shape_info,
         }
 
     def _growth_budget_remaining(self, level: int, n_plastic_neurons: int = 0) -> int:
-        """Return unspent growth capacity for a class-local or stream-global budget."""
-        if self.max_nodes_scope == "global":
-            current = int(self.ae.hidden_sizes[level])
-            consumed = max(current - int(self.initial_hidden_sizes[level]), 0)
-            return max(int(self.max_nodes[level]) - consumed, 0)
-        return max(int(self.max_nodes[level]) - int(n_plastic_neurons), 0)
+        """Return the tightest unspent class-local or stream-global budget."""
+        return int(self._growth_budget_state(level, n_plastic_neurons)["remaining"])
+
+    def _growth_budget_state(
+        self, level: int, n_plastic_neurons: int = 0
+    ) -> dict[str, int | None]:
+        """Describe independent per-class throttles and stream-wide ceilings.
+
+        ``max_nodes``/``max_nodes_scope`` remain the backwards-compatible
+        interface. Supplying either explicit limit switches to the independent
+        interface, where an omitted side is unbounded.
+        """
+        current = int(self.ae.hidden_sizes[level])
+        consumed_stream = max(current - int(self.initial_hidden_sizes[level]), 0)
+        consumed_class = max(int(n_plastic_neurons), 0)
+
+        if self._uses_explicit_growth_limits:
+            class_limit = (
+                None
+                if self.max_nodes_per_class is None
+                else int(self.max_nodes_per_class[level])
+            )
+            stream_limit = (
+                None if self.max_nodes_stream is None else int(self.max_nodes_stream[level])
+            )
+        elif self.max_nodes_scope == "global":
+            class_limit = None
+            stream_limit = int(self.max_nodes[level])
+        else:
+            class_limit = int(self.max_nodes[level])
+            stream_limit = None
+
+        class_remaining = (
+            None if class_limit is None else max(class_limit - consumed_class, 0)
+        )
+        stream_remaining = (
+            None if stream_limit is None else max(stream_limit - consumed_stream, 0)
+        )
+        finite_remaining = [
+            remaining
+            for remaining in (class_remaining, stream_remaining)
+            if remaining is not None
+        ]
+        if not finite_remaining:
+            raise ValueError(
+                "Growth requires max_nodes, max_nodes_per_class, or max_nodes_stream"
+            )
+        return {
+            "remaining": min(finite_remaining),
+            "class_limit": class_limit,
+            "class_consumed": consumed_class,
+            "class_remaining": class_remaining,
+            "stream_limit": stream_limit,
+            "stream_consumed": consumed_stream,
+            "stream_remaining": stream_remaining,
+        }
+
+    @staticmethod
+    def _budget_stop_reason(budget: dict[str, int | None]) -> str:
+        class_exhausted = budget.get("class_remaining") == 0
+        stream_exhausted = budget.get("stream_remaining") == 0
+        if class_exhausted and stream_exhausted:
+            return "class_and_stream_cap_exhausted"
+        if class_exhausted:
+            return "class_cap_exhausted"
+        if stream_exhausted:
+            return "stream_cap_exhausted"
+        return "growth_budget_available"
 
     def _shape_pressure(self, level: int) -> dict[str, Any]:
         """Return soft funnel-shape pressure for a growth decision."""
@@ -977,6 +1084,14 @@ class NeurogenesisTrainer:
             if request["growth_mode"] == "absolute"
             else 0.0,
         }
+        if request.get("class_remaining_before_growth") is not None:
+            metrics[f"{prefix}/class_remaining_before_growth"] = float(
+                request["class_remaining_before_growth"]
+            )
+        if request.get("stream_remaining_before_growth") is not None:
+            metrics[f"{prefix}/stream_remaining_before_growth"] = float(
+                request["stream_remaining_before_growth"]
+            )
         self.logger.log_metrics(metrics, step=self._class_count)
 
     def _log_growth_gate(
@@ -1133,6 +1248,54 @@ class NeurogenesisTrainer:
         return {
             name: [param.detach().clone() for param in params]
             for name, params in groups.items()
+        }
+
+    def _snapshot_named_parameters(self) -> dict[str, Tensor]:
+        if not hasattr(self.ae, "named_parameters"):
+            return {}
+        return {
+            name: parameter.detach().cpu().clone()
+            for name, parameter in self.ae.named_parameters()
+        }
+
+    def _parameter_delta_summary(self, before: dict[str, Tensor]) -> dict[str, float]:
+        """Measure trained overlap separately from newly introduced parameters."""
+        overlap_sq = 0.0
+        new_sq = 0.0
+        if not hasattr(self.ae, "named_parameters"):
+            return {
+                "overlap_parameter_delta_l2": 0.0,
+                "new_parameter_l2": 0.0,
+                "parameter_state_delta_l2": 0.0,
+            }
+        for name, parameter in self.ae.named_parameters():
+            after = parameter.detach().cpu().float()
+            old = before.get(name)
+            if old is None:
+                new_sq += float(torch.sum(after * after).item())
+                continue
+            old = old.float()
+            if old.ndim != after.ndim:
+                new_sq += float(torch.sum(after * after).item())
+                continue
+            common_shape = tuple(min(a, b) for a, b in zip(old.shape, after.shape))
+            common = tuple(slice(0, size) for size in common_shape)
+            if common_shape:
+                diff = after[common] - old[common]
+                overlap_sq += float(torch.sum(diff * diff).item())
+                if after.shape != old.shape:
+                    new_mask = torch.ones(after.shape, dtype=torch.bool)
+                    new_mask[common] = False
+                    if bool(new_mask.any()):
+                        new_values = after[new_mask]
+                        new_sq += float(torch.sum(new_values * new_values).item())
+            else:
+                diff = after - old
+                overlap_sq += float(torch.sum(diff * diff).item())
+        return {
+            "overlap_parameter_delta_l2": math.sqrt(overlap_sq),
+            "new_parameter_l2": math.sqrt(new_sq),
+            "parameter_state_delta_l2": math.sqrt(overlap_sq + new_sq),
         }
 
     def _log_global_param_delta(
@@ -1610,8 +1773,11 @@ class NeurogenesisTrainer:
     def learn_class(self, class_id: Any, loader: DataLoader) -> None:
         num_layers = len(self.ae.hidden_sizes)
         sizes_before = list(self.ae.hidden_sizes)
+        parameters_before = self._snapshot_named_parameters()
+        update_steps_before = int(getattr(self.ae, "update_steps", 0))
         self.history[class_id] = {"layer_errors": [[] for _ in range(num_layers)]}
         outlier_history: dict[int, list[dict]] = {lvl: [] for lvl in range(num_layers)}
+        level_reports: list[dict[str, Any]] = []
 
         # ---- log "class learned" ----
         self._class_count += 1
@@ -1627,8 +1793,12 @@ class NeurogenesisTrainer:
         pbar_levels = tqdm(range(num_layers), desc=f"[Class {class_id}] Layers", unit="lvl")
         for level in pbar_levels:
             added = 0
+            level_update_steps_before = int(getattr(self.ae, "update_steps", 0))
             self.ae._plastic_to_mature()
             n_plastic_neurons = 0
+            requested_nodes_total = 0
+            accepted_nodes_total = 0
+            stop_reason: str | None = None
             iteration_idx = 0
             n_outliers, outliers_loader, total_seen = self._get_outliers(
                 loader, level, class_id=class_id, iteration=iteration_idx
@@ -1647,6 +1817,11 @@ class NeurogenesisTrainer:
                     "n_outliers": n_outliers,
                     "total_seen": total_seen,
                     "fraction": fraction,
+                    "mean_mse": float(
+                        self._latest_outlier_stats.get(
+                            (str(class_id), int(level), int(iteration_idx)), {}
+                        ).get("pixel_mean", float("nan"))
+                    ),
                 }
             )
 
@@ -1655,7 +1830,8 @@ class NeurogenesisTrainer:
                     {f"class_{class_id}/growth_level_{level}": self.ae.hidden_sizes[level]},
                     step=added,
                 )
-            max_new_nodes = self._growth_budget_remaining(level)
+            initial_budget = self._growth_budget_state(level)
+            max_new_nodes = int(initial_budget["remaining"])
             pbar_growth = tqdm(
                 range(max_new_nodes), desc=f"  Level {level} Growth", unit="rnd", leave=False
             )
@@ -1692,6 +1868,14 @@ class NeurogenesisTrainer:
                     and quality_gate_passes
                     and n_plastic_neurons < max_new_nodes
                 ):
+                    if not outlier_gate_passes:
+                        stop_reason = "outlier_quota_reached"
+                    elif not quality_gate_passes:
+                        stop_reason = "quality_gate_failed"
+                    else:
+                        stop_reason = self._budget_stop_reason(
+                            self._growth_budget_state(level, n_plastic_neurons)
+                        )
                     break
 
                 nodes_existing = self.ae.encoder[2 * level].n_out_features
@@ -1703,6 +1887,7 @@ class NeurogenesisTrainer:
                     shape_info=shape_info,
                 )
                 num_new = int(request["actual_new_nodes"])
+                requested_nodes_total += int(request["requested_new_nodes"])
                 self._log_growth_request(
                     class_id=class_id,
                     level=level,
@@ -1712,10 +1897,19 @@ class NeurogenesisTrainer:
                     request=request,
                 )
                 if num_new <= 0:
+                    budget_reason = self._budget_stop_reason(
+                        self._growth_budget_state(level, n_plastic_neurons)
+                    )
+                    stop_reason = (
+                        budget_reason
+                        if budget_reason != "growth_budget_available"
+                        else "zero_growth_request"
+                    )
                     break
 
                 self.ae.add_new_nodes(level, num_new)
                 n_plastic_neurons += num_new
+                accepted_nodes_total += num_new
                 if self.logger:
                     self.logger.log_metrics(
                         {f"class_{class_id}_level_{level}_n_plastic_neurons": n_plastic_neurons},
@@ -1894,6 +2088,11 @@ class NeurogenesisTrainer:
                         "n_outliers": n_outliers,
                         "total_seen": total_seen,
                         "fraction": fraction,
+                        "mean_mse": float(
+                            self._latest_outlier_stats.get(
+                                (str(class_id), int(level), int(iteration_idx)), {}
+                            ).get("pixel_mean", float("nan"))
+                        ),
                     }
                 )
                 if self.logger:
@@ -1906,6 +2105,64 @@ class NeurogenesisTrainer:
                     )
 
             pbar_growth.close()
+
+            final_entry = outlier_history[level][-1]
+            final_shape_info = self._shape_pressure(level)
+            final_allowed = self._effective_max_outliers_allowed(
+                level=level,
+                total_seen=int(final_entry["total_seen"]),
+                shape_info=final_shape_info,
+            )
+            final_budget = self._growth_budget_state(level, n_plastic_neurons)
+            if stop_reason is None:
+                if int(final_entry["n_outliers"]) <= int(final_allowed):
+                    stop_reason = "outlier_quota_reached"
+                else:
+                    stop_reason = self._budget_stop_reason(final_budget)
+                    if stop_reason == "growth_budget_available":
+                        stop_reason = "growth_loop_exhausted"
+            unresolved_outliers = bool(
+                int(final_entry["n_outliers"]) > int(final_allowed)
+            )
+            budget_exhausted = bool(int(final_budget["remaining"]) == 0)
+            level_reports.append(
+                {
+                    "level": int(level),
+                    "width_before": int(sizes_before[level]),
+                    "width_after": int(self.ae.hidden_sizes[level]),
+                    "nodes_added": int(self.ae.hidden_sizes[level] - sizes_before[level]),
+                    "growth_rounds": int(added),
+                    "nodes_requested": int(requested_nodes_total),
+                    "nodes_accepted": int(accepted_nodes_total),
+                    "initial_outliers": int(outlier_history[level][0]["n_outliers"]),
+                    "initial_outlier_fraction": float(outlier_history[level][0]["fraction"]),
+                    "initial_mean_mse": float(outlier_history[level][0]["mean_mse"]),
+                    "final_outliers": int(final_entry["n_outliers"]),
+                    "final_outlier_fraction": float(final_entry["fraction"]),
+                    "final_mean_mse": float(final_entry["mean_mse"]),
+                    "allowed_outliers": int(final_allowed),
+                    "stop_reason": str(stop_reason),
+                    "unresolved_outliers": unresolved_outliers,
+                    "budget_exhausted": budget_exhausted,
+                    "class_limit": final_budget["class_limit"],
+                    "class_consumed": final_budget["class_consumed"],
+                    "class_remaining": final_budget["class_remaining"],
+                    "stream_limit": final_budget["stream_limit"],
+                    "stream_consumed": final_budget["stream_consumed"],
+                    "stream_remaining": final_budget["stream_remaining"],
+                    "class_cap_utilization": None
+                    if final_budget["class_limit"] in {None, 0}
+                    else float(final_budget["class_consumed"])
+                    / float(final_budget["class_limit"]),
+                    "stream_cap_utilization": None
+                    if final_budget["stream_limit"] in {None, 0}
+                    else float(final_budget["stream_consumed"])
+                    / float(final_budget["stream_limit"]),
+                    "parameter_update_steps": int(
+                        getattr(self.ae, "update_steps", 0) - level_update_steps_before
+                    ),
+                }
+            )
 
             # Next-layer plasticity & stability
             if level + 1 < num_layers and step_plasticety > 0:
@@ -1958,6 +2215,70 @@ class NeurogenesisTrainer:
             replay_only=replay_only,
             trigger="after_class",
         )
+        update_steps_after = int(getattr(self.ae, "update_steps", 0))
+        class_report: dict[str, Any] = {
+            "class_id": int(class_id) if str(class_id).lstrip("-").isdigit() else str(class_id),
+            "class_index": int(self._class_count),
+            "widths_before": [int(size) for size in sizes_before],
+            "widths_after": [int(size) for size in self.ae.hidden_sizes],
+            "model_update_steps_before": update_steps_before,
+            "model_update_steps_after": update_steps_after,
+            "model_update_steps": update_steps_after - update_steps_before,
+            "levels": level_reports,
+            **self._parameter_delta_summary(parameters_before),
+        }
+        class_report["unresolved_exhausted_levels"] = [
+            int(report["level"])
+            for report in level_reports
+            if bool(report["unresolved_outliers"])
+            and bool(report["budget_exhausted"])
+        ]
+        class_report["has_unresolved_exhausted_levels"] = bool(
+            class_report["unresolved_exhausted_levels"]
+        )
+        self.class_reports[class_id] = class_report
+        self.history[class_id]["growth_report"] = class_report
+
+        if self.logger:
+            report_metrics: dict[str, float] = {
+                f"diagnostics/class_report/class_{class_id}/model_update_steps": float(
+                    class_report["model_update_steps"]
+                ),
+                f"diagnostics/class_report/class_{class_id}/parameter_state_delta_l2": float(
+                    class_report["parameter_state_delta_l2"]
+                ),
+                f"diagnostics/class_report/class_{class_id}/has_unresolved_exhausted_levels": float(
+                    class_report["has_unresolved_exhausted_levels"]
+                ),
+            }
+            for report in level_reports:
+                prefix = (
+                    f"diagnostics/class_report/class_{class_id}/"
+                    f"level_{report['level']}"
+                )
+                report_metrics.update(
+                    {
+                        f"{prefix}/nodes_requested": float(report["nodes_requested"]),
+                        f"{prefix}/nodes_accepted": float(report["nodes_accepted"]),
+                        f"{prefix}/growth_rounds": float(report["growth_rounds"]),
+                        f"{prefix}/parameter_update_steps": float(
+                            report["parameter_update_steps"]
+                        ),
+                        f"{prefix}/initial_mean_mse": float(report["initial_mean_mse"]),
+                        f"{prefix}/final_mean_mse": float(report["final_mean_mse"]),
+                        f"{prefix}/unresolved_outliers": float(
+                            report["unresolved_outliers"]
+                        ),
+                        f"{prefix}/budget_exhausted": float(report["budget_exhausted"]),
+                    }
+                )
+            self.logger.log_metrics(report_metrics, step=self._class_count)
+            log_dict = getattr(self.logger, "log_dict", None)
+            if callable(log_dict):
+                log_dict(
+                    class_report,
+                    f"diagnostics/growth/class_{class_id}_report.json",
+                )
         # Fit replay state for the incoming class. Experiment orchestration may
         # refresh this once more after logging, but old classes are deliberately
         # left untouched here.
@@ -1996,7 +2317,7 @@ class NeurogenesisTrainer:
                     total_seen=int(final["total_seen"]),
                     shape_info=shape_info,
                 )
-                growth = int(self.ae.hidden_sizes[level_idx] - sizes_before[level_idx])
+                report = level_reports[level_idx]
                 final_metrics[
                     f"diagnostics/outliers/class_{class_id}/level_{level_idx}_final_count"
                 ] = float(final["n_outliers"])
@@ -2014,9 +2335,19 @@ class NeurogenesisTrainer:
                 ] = 1.0 if int(final["n_outliers"]) <= effective_allowed else 0.0
                 final_metrics[
                     f"diagnostics/growth/class_{class_id}/level_{level_idx}_hit_cap"
-                ] = 1.0 if growth >= int(self.max_nodes[level_idx]) else 0.0
+                ] = 1.0 if bool(report["budget_exhausted"]) else 0.0
             if final_metrics:
                 self.logger.log_metrics(final_metrics, step=self._class_count)
+
+        if class_report["has_unresolved_exhausted_levels"]:
+            message = (
+                f"Class {class_id} retained unresolved outliers after exhausting growth "
+                f"capacity at levels {class_report['unresolved_exhausted_levels']}."
+            )
+            if self.unresolved_outlier_action == "warn":
+                warnings.warn(message, RuntimeWarning, stacklevel=2)
+            elif self.unresolved_outlier_action == "error":
+                raise RuntimeError(message)
 
         loader = tqdm(
             loader,

@@ -431,6 +431,97 @@ def test_global_growth_budget_is_exhausted_after_resume_size_reaches_cap():
     assert trainer._growth_budget_remaining(0) == 0
 
 
+def test_independent_class_throttle_and_stream_ceiling_use_tighter_budget():
+    ae = DummyAE(hidden_sizes=[24])
+    trainer = NeurogenesisTrainer(
+        ae,
+        ir=None,
+        thresholds=[0.5],
+        max_nodes=[999],
+        initial_hidden_sizes=[20],
+        max_nodes_per_class=[3],
+        max_nodes_stream=[5],
+        max_outliers=1,
+    )
+
+    budget = trainer._growth_budget_state(0, n_plastic_neurons=2)
+
+    assert budget == {
+        "remaining": 1,
+        "class_limit": 3,
+        "class_consumed": 2,
+        "class_remaining": 1,
+        "stream_limit": 5,
+        "stream_consumed": 4,
+        "stream_remaining": 1,
+    }
+
+
+def test_stream_ceiling_persists_while_class_throttle_resets():
+    ae = DummyAE(hidden_sizes=[24])
+    trainer = NeurogenesisTrainer(
+        ae,
+        ir=None,
+        thresholds=[0.5],
+        max_nodes=[999],
+        initial_hidden_sizes=[20],
+        max_nodes_per_class=[4],
+        max_nodes_stream=[5],
+        max_outliers=1,
+    )
+
+    assert trainer._growth_budget_remaining(0, n_plastic_neurons=3) == 1
+    assert trainer._growth_budget_remaining(0, n_plastic_neurons=0) == 1
+    ae.hidden_sizes[0] = 25
+    assert trainer._growth_budget_remaining(0, n_plastic_neurons=0) == 0
+
+
+def test_class_report_records_exhausted_outliers_and_stop_reason(dummy_loader):
+    ae = DummyAE(hidden_sizes=[1])
+    trainer = NeurogenesisTrainer(
+        ae,
+        ir=None,
+        thresholds=[0.5],
+        max_nodes=[99],
+        initial_hidden_sizes=[1],
+        max_nodes_per_class=[1],
+        max_nodes_stream=[3],
+        max_outliers=0.5,
+        growth_mode="absolute",
+        absolute_new_nodes=1,
+        factor_max_new_nodes=1.0,
+    )
+
+    trainer.learn_class(7, dummy_loader)
+
+    report = trainer.class_reports[7]
+    level = report["levels"][0]
+    assert report["widths_before"] == [1]
+    assert report["widths_after"] == [2]
+    assert report["has_unresolved_exhausted_levels"] is True
+    assert level["nodes_requested"] == 1
+    assert level["nodes_accepted"] == 1
+    assert level["stop_reason"] == "class_cap_exhausted"
+    assert level["unresolved_outliers"] is True
+    assert level["budget_exhausted"] is True
+
+
+def test_unresolved_outlier_error_action_fails_after_recording_report(dummy_loader):
+    trainer = NeurogenesisTrainer(
+        DummyAE(hidden_sizes=[1]),
+        ir=None,
+        thresholds=[0.5],
+        max_nodes=[0],
+        max_outliers=0.5,
+        unresolved_outlier_action="error",
+    )
+
+    with pytest.raises(RuntimeError, match="unresolved outliers"):
+        trainer.learn_class(7, dummy_loader)
+
+    assert trainer.class_reports[7]["unresolved_exhausted_levels"] == [0]
+
+
 def test_growth_mode_by_level_overrides_global_mode():
     ae = DummyAE(hidden_sizes=[20, 20, 20, 20])
     trainer = NeurogenesisTrainer(

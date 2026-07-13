@@ -2083,6 +2083,7 @@ def _save_incremental_checkpoint(
     training_stats: dict,
     path_value: str,
     cfg: DictConfig,
+    growth_reports: dict | None = None,
 ) -> Path:
     # The next class begins by promoting every plastic node. Doing it here is
     # function-preserving and lets a resumed model be rebuilt from layer sizes.
@@ -2106,6 +2107,7 @@ def _save_incremental_checkpoint(
         "thresholds": [float(value) for value in thresholds],
         "eval_records": eval_records,
         "training_stats": dict(training_stats),
+        "growth_reports": _cpu_tree(growth_reports or {}),
         "model_update_steps": int(getattr(model, "update_steps", 0)),
         "replay_mode": str(cfg.replay.get("mode", "intrinsic")).lower(),
         "replay": replay_payload,
@@ -2119,6 +2121,31 @@ def _save_incremental_checkpoint(
     torch.save(payload, tmp)
     tmp.replace(path)
     return path
+
+
+def _foreground_reconstruction_mse(
+    model: NGAutoEncoder,
+    loader: DataLoader,
+    *,
+    level: int,
+    foreground_threshold: float = 0.1,
+) -> float:
+    """Return MSE over foreground pixels so sparse backgrounds cannot dominate."""
+    device = next(model.parameters()).device
+    squared_error = 0.0
+    foreground_pixels = 0
+    model.eval()
+    with torch.no_grad():
+        for batch in loader:
+            x = batch[0].to(device, non_blocking=True)
+            target = x.view(x.size(0), -1)
+            reconstruction = model.forward_partial(x, level)
+            mask = target > float(foreground_threshold)
+            if bool(mask.any()):
+                error = (reconstruction - target).pow(2)
+                squared_error += float(error[mask].sum().item())
+                foreground_pixels += int(mask.sum().item())
+    return float("nan") if foreground_pixels == 0 else squared_error / foreground_pixels
 
 
 def _evaluate(
@@ -2141,22 +2168,30 @@ def _evaluate(
     logger.log_metrics({"timing/eval_sec": time.perf_counter() - t0}, step=step)
     classes_repr = ",".join(str(int(c)) for c in classes)
     records: list[dict] = []
+    top_level = len(mean_losses) - 1
+    aggregate_foreground_mse = _foreground_reconstruction_mse(
+        trainer.ae, loader, level=top_level
+    )
+    logger.log_metrics(
+        {"metrics/val_foreground_mse": aggregate_foreground_mse}, step=step
+    )
     for idx, (mean_v, max_v, std_v) in enumerate(zip(mean_losses, max_losses, std_losses)):
         logger.log_metrics({f"metrics/val_mean_level_{idx}": mean_v}, step=step)
         logger.log_metrics({f"metrics/val_max_level_{idx}": max_v}, step=step)
         logger.log_metrics({f"metrics/val_std_level_{idx}": std_v}, step=step)
-        records.append(
-            {
-                "step": step,
-                "scope": "aggregate",
-                "class_id": "",
-                "layer": idx,
-                "classes": classes_repr,
-                "mean": mean_v,
-                "max": max_v,
-                "std": std_v,
-            }
-        )
+        record = {
+            "step": step,
+            "scope": "aggregate",
+            "class_id": "",
+            "layer": idx,
+            "classes": classes_repr,
+            "mean": mean_v,
+            "max": max_v,
+            "std": std_v,
+        }
+        if idx == top_level:
+            record["foreground_mse"] = aggregate_foreground_mse
+        records.append(record)
 
     for cls in classes:
         cls_int = int(cls)
@@ -2171,6 +2206,13 @@ def _evaluate(
             shuffle=False,
         )
         cls_mean, cls_max, cls_std = trainer.test_all_levels(cls_loader)
+        class_foreground_mse = _foreground_reconstruction_mse(
+            trainer.ae, cls_loader, level=len(cls_mean) - 1
+        )
+        logger.log_metrics(
+            {f"metrics/val_class_{cls_int}_foreground_mse": class_foreground_mse},
+            step=step,
+        )
         for idx, (mean_v, max_v, std_v) in enumerate(zip(cls_mean, cls_max, cls_std)):
             logger.log_metrics(
                 {f"metrics/val_class_{cls_int}_mean_level_{idx}": mean_v}, step=step
@@ -2181,18 +2223,19 @@ def _evaluate(
             logger.log_metrics(
                 {f"metrics/val_class_{cls_int}_std_level_{idx}": std_v}, step=step
             )
-            records.append(
-                {
-                    "step": step,
-                    "scope": "class",
-                    "class_id": cls_int,
-                    "layer": idx,
-                    "classes": classes_repr,
-                    "mean": mean_v,
-                    "max": max_v,
-                    "std": std_v,
-                }
-            )
+            record = {
+                "step": step,
+                "scope": "class",
+                "class_id": cls_int,
+                "layer": idx,
+                "classes": classes_repr,
+                "mean": mean_v,
+                "max": max_v,
+                "std": std_v,
+            }
+            if idx == len(cls_mean) - 1:
+                record["foreground_mse"] = class_foreground_mse
+            records.append(record)
     return records
 
 
@@ -2439,6 +2482,11 @@ def run(cfg: DictConfig) -> None:
             max_nodes=list(cfg.neurogenesis.max_nodes),
             max_nodes_scope=cfg.neurogenesis.get("max_nodes_scope", "per_class"),
             initial_hidden_sizes=list(cfg.model.hidden_sizes),
+            max_nodes_per_class=cfg.neurogenesis.get("max_nodes_per_class", None),
+            max_nodes_stream=cfg.neurogenesis.get("max_nodes_stream", None),
+            unresolved_outlier_action=cfg.neurogenesis.get(
+                "unresolved_outlier_action", "record"
+            ),
             max_outliers=cfg.neurogenesis.get(
                 "max_outliers", None
             )
@@ -2539,6 +2587,9 @@ def run(cfg: DictConfig) -> None:
             device=device,
             logger=logger,
         )
+
+    if resume_payload is not None and isinstance(trainer, NeurogenesisTrainer):
+        trainer.class_reports.update(resume_payload.get("growth_reports", {}))
 
     learned: list[int] = (
         [int(cls) for cls in resume_payload.get("learned", [])]
@@ -2694,6 +2745,19 @@ def run(cfg: DictConfig) -> None:
         )
         checkpoint_out = cfg.training.get("incremental_checkpoint_out", None)
         if checkpoint_out:
+            if use_neurogenesis:
+                training_stats["neurogenesis_parameter_updates"] = int(
+                    getattr(model, "update_steps", 0)
+                )
+            else:
+                training_stats["incremental_parameter_updates"] = int(
+                    getattr(trainer, "update_steps", 0)
+                )
+            training_stats["total_parameter_updates"] = (
+                training_stats["pretrain_parameter_updates"]
+                + training_stats["neurogenesis_parameter_updates"]
+                + training_stats["incremental_parameter_updates"]
+            )
             saved_path = _save_incremental_checkpoint(
                 model,
                 replay,
@@ -2703,6 +2767,7 @@ def run(cfg: DictConfig) -> None:
                 training_stats,
                 checkpoint_out,
                 cfg,
+                growth_reports=getattr(trainer, "class_reports", {}),
             )
             logger.log_text(str(saved_path), "config/incremental_checkpoint.txt")
 
@@ -2728,7 +2793,14 @@ def run(cfg: DictConfig) -> None:
     )
     logger.log_metrics({"timing/total_run_sec": time.perf_counter() - t_run0})
     logger.finish()
-    return {"model": model, "trainer": trainer, "replay": replay, "training_stats": training_stats}
+    return {
+        "model": model,
+        "trainer": trainer,
+        "replay": replay,
+        "training_stats": training_stats,
+        "growth_reports": getattr(trainer, "class_reports", {}),
+        "eval_records": eval_records,
+    }
 
 
 @hydra.main(version_base=None, config_path="../config", config_name="train")

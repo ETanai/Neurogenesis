@@ -185,6 +185,20 @@ Shape-pressure, adaptive thresholds, global coupling, and end-to-end fine-tuning
 are diagnostic extensions. They must not enter the paper-locked candidate
 unless the literal mechanism fails and the deviation is reported explicitly.
 
+Before promotion to Stage 3, add an organic-shape gate. Compare the current
+cap-driven reference (`0.01` proportional growth with cumulative allowances
+`[25,35,8,20]`) against absolute one/two-node growth under loose `2x`/`4x`
+cumulative ceilings, small per-class throttles `[4,5,2,3]` and `[8,10,4,6]`,
+and a combination of a loose stream ceiling with a small class throttle. Keep
+shape pressure off. Repeat each promoted candidate with its stream ceiling
+doubled: a demand-emergent result must remain within 10% added width per layer
+and 5% macro-MSE, stop at the outlier quota in at least 80% of growth loops,
+and continue updating on at least half of the incremental classes. Compare
+macro/foreground MSE, forgetting, parameters, update counts, runtime, and final
+shape to the current reference. Funnel shape and proximity to
+`[225,135,84,40]` are secondary observations and must not be optimization
+targets.
+
 ## Stage 3: full MNIST clean-replay validation
 
 Purpose: test the entire class sequence before introducing IR.

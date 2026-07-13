@@ -20,6 +20,7 @@ runs:
       - neurogenesis.objective_mode=paper_level_ae
       - neurogenesis.next_layer_optimization=paper_columns
       - neurogenesis.early_stop=null
+      - neurogenesis.unresolved_outlier_action=error
   - name: cl
     description: "Capacity-matched conventional learning (no neurogenesis, no replay)."
     control_size_from: ndl
@@ -43,6 +44,7 @@ runs:
       - neurogenesis.next_layer_optimization=paper_columns
       - neurogenesis.stability_replay_mode=paper
       - neurogenesis.early_stop=null
+      - neurogenesis.unresolved_outlier_action=error
   - name: cl_ir
     description: "Capacity-matched conventional learning with intrinsic replay."
     control_size_from: ndl_ir
