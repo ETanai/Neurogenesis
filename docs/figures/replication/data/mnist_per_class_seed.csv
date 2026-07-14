@@ -1,0 +1,601 @@
+condition,label,seed,class_id,learning_order,mse
+cl_dataset_oracle,CL + original data,42,1,0,0.003646207507699728
+cl_dataset_oracle,CL + original data,42,7,1,0.010034115053713322
+cl_dataset_oracle,CL + original data,42,0,2,0.014367465861141682
+cl_dataset_oracle,CL + original data,42,2,3,0.020164042711257935
+cl_dataset_oracle,CL + original data,42,3,4,0.01688103750348091
+cl_dataset_oracle,CL + original data,42,4,5,0.015236909501254559
+cl_dataset_oracle,CL + original data,42,5,6,0.018881607800722122
+cl_dataset_oracle,CL + original data,42,6,7,0.017543217167258263
+cl_dataset_oracle,CL + original data,42,8,8,0.021558169275522232
+cl_dataset_oracle,CL + original data,42,9,9,0.011936182156205177
+cl_dataset_oracle,CL + original data,43,1,0,0.0035176684614270926
+cl_dataset_oracle,CL + original data,43,7,1,0.010342618450522423
+cl_dataset_oracle,CL + original data,43,0,2,0.014270209707319736
+cl_dataset_oracle,CL + original data,43,2,3,0.02007202059030533
+cl_dataset_oracle,CL + original data,43,3,4,0.016989434137940407
+cl_dataset_oracle,CL + original data,43,4,5,0.015675460919737816
+cl_dataset_oracle,CL + original data,43,5,6,0.019450170919299126
+cl_dataset_oracle,CL + original data,43,6,7,0.017248360440135002
+cl_dataset_oracle,CL + original data,43,8,8,0.02174588292837143
+cl_dataset_oracle,CL + original data,43,9,9,0.012233581393957138
+cl_dataset_oracle,CL + original data,44,1,0,0.0036337643396109343
+cl_dataset_oracle,CL + original data,44,7,1,0.0104206008836627
+cl_dataset_oracle,CL + original data,44,0,2,0.01463707722723484
+cl_dataset_oracle,CL + original data,44,2,3,0.020291628316044807
+cl_dataset_oracle,CL + original data,44,3,4,0.017272882163524628
+cl_dataset_oracle,CL + original data,44,4,5,0.01600366085767746
+cl_dataset_oracle,CL + original data,44,5,6,0.0199004877358675
+cl_dataset_oracle,CL + original data,44,6,7,0.0175712201744318
+cl_dataset_oracle,CL + original data,44,8,8,0.02223147265613079
+cl_dataset_oracle,CL + original data,44,9,9,0.012339822947978973
+cl_dataset_oracle,CL + original data,45,1,0,0.003674024948850274
+cl_dataset_oracle,CL + original data,45,7,1,0.010479817166924477
+cl_dataset_oracle,CL + original data,45,0,2,0.014445658773183823
+cl_dataset_oracle,CL + original data,45,2,3,0.0202402975410223
+cl_dataset_oracle,CL + original data,45,3,4,0.0171506330370903
+cl_dataset_oracle,CL + original data,45,4,5,0.01598348841071129
+cl_dataset_oracle,CL + original data,45,5,6,0.019830673933029175
+cl_dataset_oracle,CL + original data,45,6,7,0.01793442852795124
+cl_dataset_oracle,CL + original data,45,8,8,0.021542828530073166
+cl_dataset_oracle,CL + original data,45,9,9,0.012159875594079494
+cl_dataset_oracle,CL + original data,46,1,0,0.0036210149992257357
+cl_dataset_oracle,CL + original data,46,7,1,0.010479179210960865
+cl_dataset_oracle,CL + original data,46,0,2,0.014682547189295292
+cl_dataset_oracle,CL + original data,46,2,3,0.020264646038413048
+cl_dataset_oracle,CL + original data,46,3,4,0.017855241894721985
+cl_dataset_oracle,CL + original data,46,4,5,0.015661031007766724
+cl_dataset_oracle,CL + original data,46,5,6,0.019937973469495773
+cl_dataset_oracle,CL + original data,46,6,7,0.01780165173113346
+cl_dataset_oracle,CL + original data,46,8,8,0.02165873907506466
+cl_dataset_oracle,CL + original data,46,9,9,0.012343712151050568
+cl_dataset_oracle,CL + original data,47,1,0,0.0038621786516159773
+cl_dataset_oracle,CL + original data,47,7,1,0.010601763613522053
+cl_dataset_oracle,CL + original data,47,0,2,0.014586612582206726
+cl_dataset_oracle,CL + original data,47,2,3,0.020330647006630898
+cl_dataset_oracle,CL + original data,47,3,4,0.01742655038833618
+cl_dataset_oracle,CL + original data,47,4,5,0.015551410615444183
+cl_dataset_oracle,CL + original data,47,5,6,0.019865453243255615
+cl_dataset_oracle,CL + original data,47,6,7,0.017864514142274857
+cl_dataset_oracle,CL + original data,47,8,8,0.022336021065711975
+cl_dataset_oracle,CL + original data,47,9,9,0.012293835170567036
+cl_dataset_oracle,CL + original data,48,1,0,0.0036487614270299673
+cl_dataset_oracle,CL + original data,48,7,1,0.01024584285914898
+cl_dataset_oracle,CL + original data,48,0,2,0.014592841267585754
+cl_dataset_oracle,CL + original data,48,2,3,0.02026166394352913
+cl_dataset_oracle,CL + original data,48,3,4,0.017631344497203827
+cl_dataset_oracle,CL + original data,48,4,5,0.01556293573230505
+cl_dataset_oracle,CL + original data,48,5,6,0.019681192934513092
+cl_dataset_oracle,CL + original data,48,6,7,0.018031762912869453
+cl_dataset_oracle,CL + original data,48,8,8,0.021675487980246544
+cl_dataset_oracle,CL + original data,48,9,9,0.012062691152095795
+cl_dataset_oracle,CL + original data,49,1,0,0.003805361455306411
+cl_dataset_oracle,CL + original data,49,7,1,0.0103760976344347
+cl_dataset_oracle,CL + original data,49,0,2,0.014616833999752998
+cl_dataset_oracle,CL + original data,49,2,3,0.02041366510093212
+cl_dataset_oracle,CL + original data,49,3,4,0.017238222062587738
+cl_dataset_oracle,CL + original data,49,4,5,0.015561592765152454
+cl_dataset_oracle,CL + original data,49,5,6,0.019492726773023605
+cl_dataset_oracle,CL + original data,49,6,7,0.017498288303613663
+cl_dataset_oracle,CL + original data,49,8,8,0.021995192393660545
+cl_dataset_oracle,CL + original data,49,9,9,0.012285173870623112
+cl_dataset_oracle,CL + original data,50,1,0,0.0037235126364976168
+cl_dataset_oracle,CL + original data,50,7,1,0.010185769759118557
+cl_dataset_oracle,CL + original data,50,0,2,0.014540689066052437
+cl_dataset_oracle,CL + original data,50,2,3,0.020259924232959747
+cl_dataset_oracle,CL + original data,50,3,4,0.017145585268735886
+cl_dataset_oracle,CL + original data,50,4,5,0.015317442826926708
+cl_dataset_oracle,CL + original data,50,5,6,0.01911305822432041
+cl_dataset_oracle,CL + original data,50,6,7,0.017354460433125496
+cl_dataset_oracle,CL + original data,50,8,8,0.02235441282391548
+cl_dataset_oracle,CL + original data,50,9,9,0.012122716754674911
+cl_dataset_oracle,CL + original data,51,1,0,0.003754529869183898
+cl_dataset_oracle,CL + original data,51,7,1,0.010311783291399479
+cl_dataset_oracle,CL + original data,51,0,2,0.014587338082492352
+cl_dataset_oracle,CL + original data,51,2,3,0.020307568833231926
+cl_dataset_oracle,CL + original data,51,3,4,0.017147034406661987
+cl_dataset_oracle,CL + original data,51,4,5,0.015928152948617935
+cl_dataset_oracle,CL + original data,51,5,6,0.01941547729074955
+cl_dataset_oracle,CL + original data,51,6,7,0.01780298538506031
+cl_dataset_oracle,CL + original data,51,8,8,0.021729901432991028
+cl_dataset_oracle,CL + original data,51,9,9,0.012137808836996555
+cl_intrinsic,CL + intrinsic replay,42,1,0,0.015630556270480156
+cl_intrinsic,CL + intrinsic replay,42,7,1,0.014163726009428501
+cl_intrinsic,CL + intrinsic replay,42,0,2,0.0341026671230793
+cl_intrinsic,CL + intrinsic replay,42,2,3,0.033815547823905945
+cl_intrinsic,CL + intrinsic replay,42,3,4,0.027300028130412102
+cl_intrinsic,CL + intrinsic replay,42,4,5,0.017969544976949692
+cl_intrinsic,CL + intrinsic replay,42,5,6,0.027758225798606873
+cl_intrinsic,CL + intrinsic replay,42,6,7,0.02871302329003811
+cl_intrinsic,CL + intrinsic replay,42,8,8,0.02513531595468521
+cl_intrinsic,CL + intrinsic replay,42,9,9,0.012957748956978321
+cl_intrinsic,CL + intrinsic replay,43,1,0,0.0159025639295578
+cl_intrinsic,CL + intrinsic replay,43,7,1,0.013314133509993553
+cl_intrinsic,CL + intrinsic replay,43,0,2,0.03213880956172943
+cl_intrinsic,CL + intrinsic replay,43,2,3,0.03320997953414917
+cl_intrinsic,CL + intrinsic replay,43,3,4,0.026160305365920067
+cl_intrinsic,CL + intrinsic replay,43,4,5,0.018091334030032158
+cl_intrinsic,CL + intrinsic replay,43,5,6,0.026353826746344566
+cl_intrinsic,CL + intrinsic replay,43,6,7,0.02732267417013645
+cl_intrinsic,CL + intrinsic replay,43,8,8,0.02397858165204525
+cl_intrinsic,CL + intrinsic replay,43,9,9,0.012767523527145386
+cl_intrinsic,CL + intrinsic replay,44,1,0,0.018646324053406715
+cl_intrinsic,CL + intrinsic replay,44,7,1,0.013449670746922493
+cl_intrinsic,CL + intrinsic replay,44,0,2,0.032512515783309937
+cl_intrinsic,CL + intrinsic replay,44,2,3,0.032897282391786575
+cl_intrinsic,CL + intrinsic replay,44,3,4,0.027027655392885208
+cl_intrinsic,CL + intrinsic replay,44,4,5,0.01765252836048603
+cl_intrinsic,CL + intrinsic replay,44,5,6,0.026479702442884445
+cl_intrinsic,CL + intrinsic replay,44,6,7,0.026642609387636185
+cl_intrinsic,CL + intrinsic replay,44,8,8,0.02397356554865837
+cl_intrinsic,CL + intrinsic replay,44,9,9,0.012652742676436901
+cl_intrinsic,CL + intrinsic replay,45,1,0,0.017851008102297783
+cl_intrinsic,CL + intrinsic replay,45,7,1,0.013726949691772461
+cl_intrinsic,CL + intrinsic replay,45,0,2,0.032438140362501144
+cl_intrinsic,CL + intrinsic replay,45,2,3,0.03496050462126732
+cl_intrinsic,CL + intrinsic replay,45,3,4,0.027767363935709
+cl_intrinsic,CL + intrinsic replay,45,4,5,0.018411103636026382
+cl_intrinsic,CL + intrinsic replay,45,5,6,0.027480820193886757
+cl_intrinsic,CL + intrinsic replay,45,6,7,0.02815667912364006
+cl_intrinsic,CL + intrinsic replay,45,8,8,0.02526424266397953
+cl_intrinsic,CL + intrinsic replay,45,9,9,0.012768791057169437
+cl_intrinsic,CL + intrinsic replay,46,1,0,0.020157286897301674
+cl_intrinsic,CL + intrinsic replay,46,7,1,0.013401814736425877
+cl_intrinsic,CL + intrinsic replay,46,0,2,0.03418857604265213
+cl_intrinsic,CL + intrinsic replay,46,2,3,0.0347939059138298
+cl_intrinsic,CL + intrinsic replay,46,3,4,0.027931181713938713
+cl_intrinsic,CL + intrinsic replay,46,4,5,0.017339235171675682
+cl_intrinsic,CL + intrinsic replay,46,5,6,0.027538038790225983
+cl_intrinsic,CL + intrinsic replay,46,6,7,0.028127113357186317
+cl_intrinsic,CL + intrinsic replay,46,8,8,0.02521767094731331
+cl_intrinsic,CL + intrinsic replay,46,9,9,0.012233464978635311
+cl_intrinsic,CL + intrinsic replay,47,1,0,0.016139190644025803
+cl_intrinsic,CL + intrinsic replay,47,7,1,0.012490463443100452
+cl_intrinsic,CL + intrinsic replay,47,0,2,0.03359336405992508
+cl_intrinsic,CL + intrinsic replay,47,2,3,0.03414437174797058
+cl_intrinsic,CL + intrinsic replay,47,3,4,0.0268095675855875
+cl_intrinsic,CL + intrinsic replay,47,4,5,0.01763419434428215
+cl_intrinsic,CL + intrinsic replay,47,5,6,0.027187997475266457
+cl_intrinsic,CL + intrinsic replay,47,6,7,0.028302442282438278
+cl_intrinsic,CL + intrinsic replay,47,8,8,0.02500518225133419
+cl_intrinsic,CL + intrinsic replay,47,9,9,0.01262647844851017
+cl_intrinsic,CL + intrinsic replay,48,1,0,0.01796511746942997
+cl_intrinsic,CL + intrinsic replay,48,7,1,0.01416925061494112
+cl_intrinsic,CL + intrinsic replay,48,0,2,0.03423622250556946
+cl_intrinsic,CL + intrinsic replay,48,2,3,0.0365944467484951
+cl_intrinsic,CL + intrinsic replay,48,3,4,0.029879920184612274
+cl_intrinsic,CL + intrinsic replay,48,4,5,0.018180277198553085
+cl_intrinsic,CL + intrinsic replay,48,5,6,0.02918928675353527
+cl_intrinsic,CL + intrinsic replay,48,6,7,0.028457913547754288
+cl_intrinsic,CL + intrinsic replay,48,8,8,0.02562246471643448
+cl_intrinsic,CL + intrinsic replay,48,9,9,0.01277974247932434
+cl_intrinsic,CL + intrinsic replay,49,1,0,0.01927536353468895
+cl_intrinsic,CL + intrinsic replay,49,7,1,0.013017010875046253
+cl_intrinsic,CL + intrinsic replay,49,0,2,0.03385114669799805
+cl_intrinsic,CL + intrinsic replay,49,2,3,0.03339885175228119
+cl_intrinsic,CL + intrinsic replay,49,3,4,0.029000747948884964
+cl_intrinsic,CL + intrinsic replay,49,4,5,0.018068378791213036
+cl_intrinsic,CL + intrinsic replay,49,5,6,0.028077060356736183
+cl_intrinsic,CL + intrinsic replay,49,6,7,0.027961907908320427
+cl_intrinsic,CL + intrinsic replay,49,8,8,0.025227008387446404
+cl_intrinsic,CL + intrinsic replay,49,9,9,0.012918773107230663
+cl_intrinsic,CL + intrinsic replay,50,1,0,0.019262710586190224
+cl_intrinsic,CL + intrinsic replay,50,7,1,0.013485082425177097
+cl_intrinsic,CL + intrinsic replay,50,0,2,0.03459801524877548
+cl_intrinsic,CL + intrinsic replay,50,2,3,0.03395380079746246
+cl_intrinsic,CL + intrinsic replay,50,3,4,0.027588699012994766
+cl_intrinsic,CL + intrinsic replay,50,4,5,0.017639875411987305
+cl_intrinsic,CL + intrinsic replay,50,5,6,0.027847282588481903
+cl_intrinsic,CL + intrinsic replay,50,6,7,0.027029789984226227
+cl_intrinsic,CL + intrinsic replay,50,8,8,0.025296790525317192
+cl_intrinsic,CL + intrinsic replay,50,9,9,0.012679853476583958
+cl_intrinsic,CL + intrinsic replay,51,1,0,0.020884577184915543
+cl_intrinsic,CL + intrinsic replay,51,7,1,0.014534792862832546
+cl_intrinsic,CL + intrinsic replay,51,0,2,0.0340670607984066
+cl_intrinsic,CL + intrinsic replay,51,2,3,0.0336814746260643
+cl_intrinsic,CL + intrinsic replay,51,3,4,0.027286259457468987
+cl_intrinsic,CL + intrinsic replay,51,4,5,0.01780911535024643
+cl_intrinsic,CL + intrinsic replay,51,5,6,0.02761014923453331
+cl_intrinsic,CL + intrinsic replay,51,6,7,0.028132343664765358
+cl_intrinsic,CL + intrinsic replay,51,8,8,0.02529376931488514
+cl_intrinsic,CL + intrinsic replay,51,9,9,0.012968696653842926
+cl_no_replay,"CL, no replay",42,1,0,0.010562158189713955
+cl_no_replay,"CL, no replay",42,7,1,0.016182800754904747
+cl_no_replay,"CL, no replay",42,0,2,0.03991148620843887
+cl_no_replay,"CL, no replay",42,2,3,0.038285993039608
+cl_no_replay,"CL, no replay",42,3,4,0.02917342446744442
+cl_no_replay,"CL, no replay",42,4,5,0.019508250057697296
+cl_no_replay,"CL, no replay",42,5,6,0.030775314196944237
+cl_no_replay,"CL, no replay",42,6,7,0.03510795906186104
+cl_no_replay,"CL, no replay",42,8,8,0.02738594450056553
+cl_no_replay,"CL, no replay",42,9,9,0.010789288207888603
+cl_no_replay,"CL, no replay",43,1,0,0.009281763806939125
+cl_no_replay,"CL, no replay",43,7,1,0.016942910850048065
+cl_no_replay,"CL, no replay",43,0,2,0.04366719722747803
+cl_no_replay,"CL, no replay",43,2,3,0.042020589113235474
+cl_no_replay,"CL, no replay",43,3,4,0.030686575919389725
+cl_no_replay,"CL, no replay",43,4,5,0.020209603011608124
+cl_no_replay,"CL, no replay",43,5,6,0.033724524080753326
+cl_no_replay,"CL, no replay",43,6,7,0.037012238055467606
+cl_no_replay,"CL, no replay",43,8,8,0.028389012441039085
+cl_no_replay,"CL, no replay",43,9,9,0.010974210686981678
+cl_no_replay,"CL, no replay",44,1,0,0.009263337589800358
+cl_no_replay,"CL, no replay",44,7,1,0.01621563546359539
+cl_no_replay,"CL, no replay",44,0,2,0.040037136524915695
+cl_no_replay,"CL, no replay",44,2,3,0.039269573986530304
+cl_no_replay,"CL, no replay",44,3,4,0.029874509200453758
+cl_no_replay,"CL, no replay",44,4,5,0.02003510296344757
+cl_no_replay,"CL, no replay",44,5,6,0.03200017660856247
+cl_no_replay,"CL, no replay",44,6,7,0.03316372632980347
+cl_no_replay,"CL, no replay",44,8,8,0.0274296123534441
+cl_no_replay,"CL, no replay",44,9,9,0.010728966444730759
+cl_no_replay,"CL, no replay",45,1,0,0.009093672037124634
+cl_no_replay,"CL, no replay",45,7,1,0.016999032348394394
+cl_no_replay,"CL, no replay",45,0,2,0.04118489474058151
+cl_no_replay,"CL, no replay",45,2,3,0.0385109968483448
+cl_no_replay,"CL, no replay",45,3,4,0.030165962874889374
+cl_no_replay,"CL, no replay",45,4,5,0.020082704722881317
+cl_no_replay,"CL, no replay",45,5,6,0.03296712785959244
+cl_no_replay,"CL, no replay",45,6,7,0.03247562423348427
+cl_no_replay,"CL, no replay",45,8,8,0.027227217331528664
+cl_no_replay,"CL, no replay",45,9,9,0.010725789703428745
+cl_no_replay,"CL, no replay",46,1,0,0.009610398672521114
+cl_no_replay,"CL, no replay",46,7,1,0.016347266733646393
+cl_no_replay,"CL, no replay",46,0,2,0.03790461644530296
+cl_no_replay,"CL, no replay",46,2,3,0.039210349321365356
+cl_no_replay,"CL, no replay",46,3,4,0.029342753812670708
+cl_no_replay,"CL, no replay",46,4,5,0.019267383962869644
+cl_no_replay,"CL, no replay",46,5,6,0.031418073922395706
+cl_no_replay,"CL, no replay",46,6,7,0.035288888961076736
+cl_no_replay,"CL, no replay",46,8,8,0.027142951264977455
+cl_no_replay,"CL, no replay",46,9,9,0.010540965013206005
+cl_no_replay,"CL, no replay",47,1,0,0.01037958636879921
+cl_no_replay,"CL, no replay",47,7,1,0.01651669852435589
+cl_no_replay,"CL, no replay",47,0,2,0.03975830599665642
+cl_no_replay,"CL, no replay",47,2,3,0.03953016176819801
+cl_no_replay,"CL, no replay",47,3,4,0.02912239171564579
+cl_no_replay,"CL, no replay",47,4,5,0.020078344270586967
+cl_no_replay,"CL, no replay",47,5,6,0.03139109909534454
+cl_no_replay,"CL, no replay",47,6,7,0.03315311670303345
+cl_no_replay,"CL, no replay",47,8,8,0.028452178463339806
+cl_no_replay,"CL, no replay",47,9,9,0.010784211568534374
+cl_no_replay,"CL, no replay",48,1,0,0.010314169339835644
+cl_no_replay,"CL, no replay",48,7,1,0.017044395208358765
+cl_no_replay,"CL, no replay",48,0,2,0.038459714502096176
+cl_no_replay,"CL, no replay",48,2,3,0.04036328196525574
+cl_no_replay,"CL, no replay",48,3,4,0.030191252008080482
+cl_no_replay,"CL, no replay",48,4,5,0.020136121660470963
+cl_no_replay,"CL, no replay",48,5,6,0.03213394433259964
+cl_no_replay,"CL, no replay",48,6,7,0.033681683242321014
+cl_no_replay,"CL, no replay",48,8,8,0.028120961040258408
+cl_no_replay,"CL, no replay",48,9,9,0.010803109966218472
+cl_no_replay,"CL, no replay",49,1,0,0.010180601850152016
+cl_no_replay,"CL, no replay",49,7,1,0.0170747023075819
+cl_no_replay,"CL, no replay",49,0,2,0.043254461139440536
+cl_no_replay,"CL, no replay",49,2,3,0.04007473215460777
+cl_no_replay,"CL, no replay",49,3,4,0.0320543497800827
+cl_no_replay,"CL, no replay",49,4,5,0.019725041463971138
+cl_no_replay,"CL, no replay",49,5,6,0.034187376499176025
+cl_no_replay,"CL, no replay",49,6,7,0.0345061719417572
+cl_no_replay,"CL, no replay",49,8,8,0.029295051470398903
+cl_no_replay,"CL, no replay",49,9,9,0.010776933282613754
+cl_no_replay,"CL, no replay",50,1,0,0.010145016014575958
+cl_no_replay,"CL, no replay",50,7,1,0.017702611163258553
+cl_no_replay,"CL, no replay",50,0,2,0.04269367456436157
+cl_no_replay,"CL, no replay",50,2,3,0.038375772535800934
+cl_no_replay,"CL, no replay",50,3,4,0.0319007933139801
+cl_no_replay,"CL, no replay",50,4,5,0.019715188071131706
+cl_no_replay,"CL, no replay",50,5,6,0.03246617317199707
+cl_no_replay,"CL, no replay",50,6,7,0.033657874912023544
+cl_no_replay,"CL, no replay",50,8,8,0.02841959521174431
+cl_no_replay,"CL, no replay",50,9,9,0.011024842970073223
+cl_no_replay,"CL, no replay",51,1,0,0.009666034020483494
+cl_no_replay,"CL, no replay",51,7,1,0.016117578372359276
+cl_no_replay,"CL, no replay",51,0,2,0.0408216193318367
+cl_no_replay,"CL, no replay",51,2,3,0.038776811212301254
+cl_no_replay,"CL, no replay",51,3,4,0.030488362535834312
+cl_no_replay,"CL, no replay",51,4,5,0.019767725840210915
+cl_no_replay,"CL, no replay",51,5,6,0.031976744532585144
+cl_no_replay,"CL, no replay",51,6,7,0.033487703651189804
+cl_no_replay,"CL, no replay",51,8,8,0.027743464335799217
+cl_no_replay,"CL, no replay",51,9,9,0.010666681453585625
+ndl_dataset_oracle,NDL + original data,42,1,0,0.006659978069365025
+ndl_dataset_oracle,NDL + original data,42,7,1,0.017908504232764244
+ndl_dataset_oracle,NDL + original data,42,0,2,0.06524471193552017
+ndl_dataset_oracle,NDL + original data,42,2,3,0.05977930128574371
+ndl_dataset_oracle,NDL + original data,42,3,4,0.06086364760994911
+ndl_dataset_oracle,NDL + original data,42,4,5,0.04762239009141922
+ndl_dataset_oracle,NDL + original data,42,5,6,0.059733014553785324
+ndl_dataset_oracle,NDL + original data,42,6,7,0.07028695195913315
+ndl_dataset_oracle,NDL + original data,42,8,8,0.05488411709666252
+ndl_dataset_oracle,NDL + original data,42,9,9,0.03810585290193558
+ndl_dataset_oracle,NDL + original data,43,1,0,0.006458592601120472
+ndl_dataset_oracle,NDL + original data,43,7,1,0.01801195740699768
+ndl_dataset_oracle,NDL + original data,43,0,2,0.05880715325474739
+ndl_dataset_oracle,NDL + original data,43,2,3,0.05693532153964043
+ndl_dataset_oracle,NDL + original data,43,3,4,0.060238003730773926
+ndl_dataset_oracle,NDL + original data,43,4,5,0.04666933789849281
+ndl_dataset_oracle,NDL + original data,43,5,6,0.06267251074314117
+ndl_dataset_oracle,NDL + original data,43,6,7,0.06638740003108978
+ndl_dataset_oracle,NDL + original data,43,8,8,0.05745917931199074
+ndl_dataset_oracle,NDL + original data,43,9,9,0.038791049271821976
+ndl_dataset_oracle,NDL + original data,44,1,0,0.006311291363090277
+ndl_dataset_oracle,NDL + original data,44,7,1,0.01753954403102398
+ndl_dataset_oracle,NDL + original data,44,0,2,0.0667751356959343
+ndl_dataset_oracle,NDL + original data,44,2,3,0.05680878832936287
+ndl_dataset_oracle,NDL + original data,44,3,4,0.06384707242250443
+ndl_dataset_oracle,NDL + original data,44,4,5,0.04812219738960266
+ndl_dataset_oracle,NDL + original data,44,5,6,0.06267204880714417
+ndl_dataset_oracle,NDL + original data,44,6,7,0.06540124118328094
+ndl_dataset_oracle,NDL + original data,44,8,8,0.056017957627773285
+ndl_dataset_oracle,NDL + original data,44,9,9,0.03863820806145668
+ndl_dataset_oracle,NDL + original data,45,1,0,0.006574955303221941
+ndl_dataset_oracle,NDL + original data,45,7,1,0.01841891184449196
+ndl_dataset_oracle,NDL + original data,45,0,2,0.06495299190282822
+ndl_dataset_oracle,NDL + original data,45,2,3,0.05893625319004059
+ndl_dataset_oracle,NDL + original data,45,3,4,0.06337805092334747
+ndl_dataset_oracle,NDL + original data,45,4,5,0.050165679305791855
+ndl_dataset_oracle,NDL + original data,45,5,6,0.06475173681974411
+ndl_dataset_oracle,NDL + original data,45,6,7,0.07094451785087585
+ndl_dataset_oracle,NDL + original data,45,8,8,0.059196241199970245
+ndl_dataset_oracle,NDL + original data,45,9,9,0.040088605135679245
+ndl_dataset_oracle,NDL + original data,46,1,0,0.006689512636512518
+ndl_dataset_oracle,NDL + original data,46,7,1,0.017947740852832794
+ndl_dataset_oracle,NDL + original data,46,0,2,0.06683040410280228
+ndl_dataset_oracle,NDL + original data,46,2,3,0.05942069739103317
+ndl_dataset_oracle,NDL + original data,46,3,4,0.06127634271979332
+ndl_dataset_oracle,NDL + original data,46,4,5,0.05242209881544113
+ndl_dataset_oracle,NDL + original data,46,5,6,0.0608338825404644
+ndl_dataset_oracle,NDL + original data,46,6,7,0.06993107497692108
+ndl_dataset_oracle,NDL + original data,46,8,8,0.05831887945532799
+ndl_dataset_oracle,NDL + original data,46,9,9,0.039723385125398636
+ndl_dataset_oracle,NDL + original data,47,1,0,0.006202493794262409
+ndl_dataset_oracle,NDL + original data,47,7,1,0.017900168895721436
+ndl_dataset_oracle,NDL + original data,47,0,2,0.06218155100941658
+ndl_dataset_oracle,NDL + original data,47,2,3,0.05789938569068909
+ndl_dataset_oracle,NDL + original data,47,3,4,0.05936726927757263
+ndl_dataset_oracle,NDL + original data,47,4,5,0.05066223070025444
+ndl_dataset_oracle,NDL + original data,47,5,6,0.059242963790893555
+ndl_dataset_oracle,NDL + original data,47,6,7,0.06822317093610764
+ndl_dataset_oracle,NDL + original data,47,8,8,0.06001189723610878
+ndl_dataset_oracle,NDL + original data,47,9,9,0.03955705091357231
+ndl_dataset_oracle,NDL + original data,48,1,0,0.006795101799070835
+ndl_dataset_oracle,NDL + original data,48,7,1,0.018105052411556244
+ndl_dataset_oracle,NDL + original data,48,0,2,0.06900031119585037
+ndl_dataset_oracle,NDL + original data,48,2,3,0.058465827256441116
+ndl_dataset_oracle,NDL + original data,48,3,4,0.06207440793514252
+ndl_dataset_oracle,NDL + original data,48,4,5,0.04440390318632126
+ndl_dataset_oracle,NDL + original data,48,5,6,0.06323018670082092
+ndl_dataset_oracle,NDL + original data,48,6,7,0.0685020387172699
+ndl_dataset_oracle,NDL + original data,48,8,8,0.055555958300828934
+ndl_dataset_oracle,NDL + original data,48,9,9,0.036044612526893616
+ndl_dataset_oracle,NDL + original data,49,1,0,0.006666314322501421
+ndl_dataset_oracle,NDL + original data,49,7,1,0.017742570489645004
+ndl_dataset_oracle,NDL + original data,49,0,2,0.06500710546970367
+ndl_dataset_oracle,NDL + original data,49,2,3,0.05635231360793114
+ndl_dataset_oracle,NDL + original data,49,3,4,0.05945558100938797
+ndl_dataset_oracle,NDL + original data,49,4,5,0.05018649622797966
+ndl_dataset_oracle,NDL + original data,49,5,6,0.0627526268362999
+ndl_dataset_oracle,NDL + original data,49,6,7,0.06707821786403656
+ndl_dataset_oracle,NDL + original data,49,8,8,0.057995617389678955
+ndl_dataset_oracle,NDL + original data,49,9,9,0.03866340219974518
+ndl_dataset_oracle,NDL + original data,50,1,0,0.007245310582220554
+ndl_dataset_oracle,NDL + original data,50,7,1,0.01878483034670353
+ndl_dataset_oracle,NDL + original data,50,0,2,0.06178613379597664
+ndl_dataset_oracle,NDL + original data,50,2,3,0.05758648365736008
+ndl_dataset_oracle,NDL + original data,50,3,4,0.05912844464182854
+ndl_dataset_oracle,NDL + original data,50,4,5,0.04872683063149452
+ndl_dataset_oracle,NDL + original data,50,5,6,0.059845566749572754
+ndl_dataset_oracle,NDL + original data,50,6,7,0.06899334490299225
+ndl_dataset_oracle,NDL + original data,50,8,8,0.05664106458425522
+ndl_dataset_oracle,NDL + original data,50,9,9,0.0391656756401062
+ndl_dataset_oracle,NDL + original data,51,1,0,0.006661428138613701
+ndl_dataset_oracle,NDL + original data,51,7,1,0.017584290355443954
+ndl_dataset_oracle,NDL + original data,51,0,2,0.06366480141878128
+ndl_dataset_oracle,NDL + original data,51,2,3,0.055703092366456985
+ndl_dataset_oracle,NDL + original data,51,3,4,0.05826394259929657
+ndl_dataset_oracle,NDL + original data,51,4,5,0.04948525130748749
+ndl_dataset_oracle,NDL + original data,51,5,6,0.06243998184800148
+ndl_dataset_oracle,NDL + original data,51,6,7,0.0645432323217392
+ndl_dataset_oracle,NDL + original data,51,8,8,0.05640243738889694
+ndl_dataset_oracle,NDL + original data,51,9,9,0.03869827464222908
+ndl_intrinsic,NDL + intrinsic replay,42,1,0,0.024329999461770058
+ndl_intrinsic,NDL + intrinsic replay,42,7,1,0.040395673364400864
+ndl_intrinsic,NDL + intrinsic replay,42,0,2,0.09959669411182404
+ndl_intrinsic,NDL + intrinsic replay,42,2,3,0.08431505411863327
+ndl_intrinsic,NDL + intrinsic replay,42,3,4,0.07492894679307938
+ndl_intrinsic,NDL + intrinsic replay,42,4,5,0.05987880006432533
+ndl_intrinsic,NDL + intrinsic replay,42,5,6,0.07388101518154144
+ndl_intrinsic,NDL + intrinsic replay,42,6,7,0.07968667149543762
+ndl_intrinsic,NDL + intrinsic replay,42,8,8,0.06489750742912292
+ndl_intrinsic,NDL + intrinsic replay,42,9,9,0.04733771085739136
+ndl_intrinsic,NDL + intrinsic replay,43,1,0,0.025179702788591385
+ndl_intrinsic,NDL + intrinsic replay,43,7,1,0.04194950312376022
+ndl_intrinsic,NDL + intrinsic replay,43,0,2,0.09352149814367294
+ndl_intrinsic,NDL + intrinsic replay,43,2,3,0.07778451591730118
+ndl_intrinsic,NDL + intrinsic replay,43,3,4,0.0744074359536171
+ndl_intrinsic,NDL + intrinsic replay,43,4,5,0.05719105899333954
+ndl_intrinsic,NDL + intrinsic replay,43,5,6,0.07402303069829941
+ndl_intrinsic,NDL + intrinsic replay,43,6,7,0.07900576293468475
+ndl_intrinsic,NDL + intrinsic replay,43,8,8,0.06678986549377441
+ndl_intrinsic,NDL + intrinsic replay,43,9,9,0.04882315918803215
+ndl_intrinsic,NDL + intrinsic replay,44,1,0,0.029179658740758896
+ndl_intrinsic,NDL + intrinsic replay,44,7,1,0.04825057089328766
+ndl_intrinsic,NDL + intrinsic replay,44,0,2,0.10426964610815048
+ndl_intrinsic,NDL + intrinsic replay,44,2,3,0.08371055871248245
+ndl_intrinsic,NDL + intrinsic replay,44,3,4,0.08017229288816452
+ndl_intrinsic,NDL + intrinsic replay,44,4,5,0.05792219936847687
+ndl_intrinsic,NDL + intrinsic replay,44,5,6,0.0743725374341011
+ndl_intrinsic,NDL + intrinsic replay,44,6,7,0.08033189922571182
+ndl_intrinsic,NDL + intrinsic replay,44,8,8,0.06877604871988297
+ndl_intrinsic,NDL + intrinsic replay,44,9,9,0.04877641052007675
+ndl_intrinsic,NDL + intrinsic replay,45,1,0,0.025506354868412018
+ndl_intrinsic,NDL + intrinsic replay,45,7,1,0.04285876825451851
+ndl_intrinsic,NDL + intrinsic replay,45,0,2,0.09631340205669403
+ndl_intrinsic,NDL + intrinsic replay,45,2,3,0.07683169841766357
+ndl_intrinsic,NDL + intrinsic replay,45,3,4,0.07628423720598221
+ndl_intrinsic,NDL + intrinsic replay,45,4,5,0.05544082820415497
+ndl_intrinsic,NDL + intrinsic replay,45,5,6,0.0731305181980133
+ndl_intrinsic,NDL + intrinsic replay,45,6,7,0.07633267343044281
+ndl_intrinsic,NDL + intrinsic replay,45,8,8,0.06384693086147308
+ndl_intrinsic,NDL + intrinsic replay,45,9,9,0.05054759234189987
+ndl_intrinsic,NDL + intrinsic replay,46,1,0,0.020620126277208328
+ndl_intrinsic,NDL + intrinsic replay,46,7,1,0.03484581410884857
+ndl_intrinsic,NDL + intrinsic replay,46,0,2,0.09298691898584366
+ndl_intrinsic,NDL + intrinsic replay,46,2,3,0.07411932945251465
+ndl_intrinsic,NDL + intrinsic replay,46,3,4,0.06983432173728943
+ndl_intrinsic,NDL + intrinsic replay,46,4,5,0.0548749677836895
+ndl_intrinsic,NDL + intrinsic replay,46,5,6,0.07172887027263641
+ndl_intrinsic,NDL + intrinsic replay,46,6,7,0.0803743526339531
+ndl_intrinsic,NDL + intrinsic replay,46,8,8,0.06294494867324829
+ndl_intrinsic,NDL + intrinsic replay,46,9,9,0.04288669303059578
+ndl_intrinsic,NDL + intrinsic replay,47,1,0,0.02979152463376522
+ndl_intrinsic,NDL + intrinsic replay,47,7,1,0.0441049225628376
+ndl_intrinsic,NDL + intrinsic replay,47,0,2,0.09860964119434357
+ndl_intrinsic,NDL + intrinsic replay,47,2,3,0.0781351700425148
+ndl_intrinsic,NDL + intrinsic replay,47,3,4,0.08009480684995651
+ndl_intrinsic,NDL + intrinsic replay,47,4,5,0.0594608299434185
+ndl_intrinsic,NDL + intrinsic replay,47,5,6,0.08001343160867691
+ndl_intrinsic,NDL + intrinsic replay,47,6,7,0.07919234037399292
+ndl_intrinsic,NDL + intrinsic replay,47,8,8,0.06976118683815002
+ndl_intrinsic,NDL + intrinsic replay,47,9,9,0.04967113211750984
+ndl_intrinsic,NDL + intrinsic replay,48,1,0,0.027969032526016235
+ndl_intrinsic,NDL + intrinsic replay,48,7,1,0.04458838701248169
+ndl_intrinsic,NDL + intrinsic replay,48,0,2,0.10366381704807281
+ndl_intrinsic,NDL + intrinsic replay,48,2,3,0.08492832630872726
+ndl_intrinsic,NDL + intrinsic replay,48,3,4,0.07729209214448929
+ndl_intrinsic,NDL + intrinsic replay,48,4,5,0.0638962909579277
+ndl_intrinsic,NDL + intrinsic replay,48,5,6,0.07600264996290207
+ndl_intrinsic,NDL + intrinsic replay,48,6,7,0.0835353434085846
+ndl_intrinsic,NDL + intrinsic replay,48,8,8,0.06987135112285614
+ndl_intrinsic,NDL + intrinsic replay,48,9,9,0.05222379416227341
+ndl_intrinsic,NDL + intrinsic replay,49,1,0,0.023644326254725456
+ndl_intrinsic,NDL + intrinsic replay,49,7,1,0.04285580664873123
+ndl_intrinsic,NDL + intrinsic replay,49,0,2,0.09867563098669052
+ndl_intrinsic,NDL + intrinsic replay,49,2,3,0.08314894884824753
+ndl_intrinsic,NDL + intrinsic replay,49,3,4,0.08040262013673782
+ndl_intrinsic,NDL + intrinsic replay,49,4,5,0.05619785562157631
+ndl_intrinsic,NDL + intrinsic replay,49,5,6,0.07404514402151108
+ndl_intrinsic,NDL + intrinsic replay,49,6,7,0.07618287950754166
+ndl_intrinsic,NDL + intrinsic replay,49,8,8,0.06469648331403732
+ndl_intrinsic,NDL + intrinsic replay,49,9,9,0.04668013006448746
+ndl_intrinsic,NDL + intrinsic replay,50,1,0,0.02273234724998474
+ndl_intrinsic,NDL + intrinsic replay,50,7,1,0.04019925743341446
+ndl_intrinsic,NDL + intrinsic replay,50,0,2,0.09290382266044617
+ndl_intrinsic,NDL + intrinsic replay,50,2,3,0.08075520396232605
+ndl_intrinsic,NDL + intrinsic replay,50,3,4,0.07813502103090286
+ndl_intrinsic,NDL + intrinsic replay,50,4,5,0.06049708276987076
+ndl_intrinsic,NDL + intrinsic replay,50,5,6,0.0705861821770668
+ndl_intrinsic,NDL + intrinsic replay,50,6,7,0.07723511010408401
+ndl_intrinsic,NDL + intrinsic replay,50,8,8,0.06246120110154152
+ndl_intrinsic,NDL + intrinsic replay,50,9,9,0.04566013440489769
+ndl_intrinsic,NDL + intrinsic replay,51,1,0,0.025131192058324814
+ndl_intrinsic,NDL + intrinsic replay,51,7,1,0.03864238038659096
+ndl_intrinsic,NDL + intrinsic replay,51,0,2,0.1052807942032814
+ndl_intrinsic,NDL + intrinsic replay,51,2,3,0.0739077776670456
+ndl_intrinsic,NDL + intrinsic replay,51,3,4,0.07416301965713501
+ndl_intrinsic,NDL + intrinsic replay,51,4,5,0.05292316526174545
+ndl_intrinsic,NDL + intrinsic replay,51,5,6,0.07697200030088425
+ndl_intrinsic,NDL + intrinsic replay,51,6,7,0.08069474995136261
+ndl_intrinsic,NDL + intrinsic replay,51,8,8,0.06450936198234558
+ndl_intrinsic,NDL + intrinsic replay,51,9,9,0.04403185844421387
+ndl_no_replay,"NDL, no replay",42,1,0,0.011312802322208881
+ndl_no_replay,"NDL, no replay",42,7,1,0.02552921138703823
+ndl_no_replay,"NDL, no replay",42,0,2,0.06096477434039116
+ndl_no_replay,"NDL, no replay",42,2,3,0.06080456078052521
+ndl_no_replay,"NDL, no replay",42,3,4,0.06084231287240982
+ndl_no_replay,"NDL, no replay",42,4,5,0.054299384355545044
+ndl_no_replay,"NDL, no replay",42,5,6,0.06073633208870888
+ndl_no_replay,"NDL, no replay",42,6,7,0.07253428548574448
+ndl_no_replay,"NDL, no replay",42,8,8,0.06007463485002518
+ndl_no_replay,"NDL, no replay",42,9,9,0.044198811054229736
+ndl_no_replay,"NDL, no replay",43,1,0,0.010497000068426132
+ndl_no_replay,"NDL, no replay",43,7,1,0.02459884062409401
+ndl_no_replay,"NDL, no replay",43,0,2,0.054104819893836975
+ndl_no_replay,"NDL, no replay",43,2,3,0.05701224505901337
+ndl_no_replay,"NDL, no replay",43,3,4,0.06088636443018913
+ndl_no_replay,"NDL, no replay",43,4,5,0.053957391530275345
+ndl_no_replay,"NDL, no replay",43,5,6,0.06258875131607056
+ndl_no_replay,"NDL, no replay",43,6,7,0.06872617453336716
+ndl_no_replay,"NDL, no replay",43,8,8,0.05747603625059128
+ndl_no_replay,"NDL, no replay",43,9,9,0.04634227231144905
+ndl_no_replay,"NDL, no replay",44,1,0,0.01012112945318222
+ndl_no_replay,"NDL, no replay",44,7,1,0.02250082418322563
+ndl_no_replay,"NDL, no replay",44,0,2,0.05756998807191849
+ndl_no_replay,"NDL, no replay",44,2,3,0.053557779639959335
+ndl_no_replay,"NDL, no replay",44,3,4,0.06106465682387352
+ndl_no_replay,"NDL, no replay",44,4,5,0.05154837295413017
+ndl_no_replay,"NDL, no replay",44,5,6,0.06048772856593132
+ndl_no_replay,"NDL, no replay",44,6,7,0.06403538584709167
+ndl_no_replay,"NDL, no replay",44,8,8,0.05585901811718941
+ndl_no_replay,"NDL, no replay",44,9,9,0.04270932078361511
+ndl_no_replay,"NDL, no replay",45,1,0,0.010584463365375996
+ndl_no_replay,"NDL, no replay",45,7,1,0.023949531838297844
+ndl_no_replay,"NDL, no replay",45,0,2,0.05633984133601189
+ndl_no_replay,"NDL, no replay",45,2,3,0.05754302814602852
+ndl_no_replay,"NDL, no replay",45,3,4,0.06076426804065704
+ndl_no_replay,"NDL, no replay",45,4,5,0.055829714983701706
+ndl_no_replay,"NDL, no replay",45,5,6,0.0630536675453186
+ndl_no_replay,"NDL, no replay",45,6,7,0.06885043531656265
+ndl_no_replay,"NDL, no replay",45,8,8,0.05985735356807709
+ndl_no_replay,"NDL, no replay",45,9,9,0.0463130809366703
+ndl_no_replay,"NDL, no replay",46,1,0,0.011448951438069344
+ndl_no_replay,"NDL, no replay",46,7,1,0.0259451512247324
+ndl_no_replay,"NDL, no replay",46,0,2,0.06403490900993347
+ndl_no_replay,"NDL, no replay",46,2,3,0.05980318784713745
+ndl_no_replay,"NDL, no replay",46,3,4,0.06662099063396454
+ndl_no_replay,"NDL, no replay",46,4,5,0.05909882113337517
+ndl_no_replay,"NDL, no replay",46,5,6,0.06728486716747284
+ndl_no_replay,"NDL, no replay",46,6,7,0.07052847743034363
+ndl_no_replay,"NDL, no replay",46,8,8,0.06611955165863037
+ndl_no_replay,"NDL, no replay",46,9,9,0.04978729039430618
+ndl_no_replay,"NDL, no replay",47,1,0,0.00958341732621193
+ndl_no_replay,"NDL, no replay",47,7,1,0.02343619428575039
+ndl_no_replay,"NDL, no replay",47,0,2,0.059199221432209015
+ndl_no_replay,"NDL, no replay",47,2,3,0.05857110023498535
+ndl_no_replay,"NDL, no replay",47,3,4,0.06019283086061478
+ndl_no_replay,"NDL, no replay",47,4,5,0.05479950085282326
+ndl_no_replay,"NDL, no replay",47,5,6,0.05897102877497673
+ndl_no_replay,"NDL, no replay",47,6,7,0.06949449330568314
+ndl_no_replay,"NDL, no replay",47,8,8,0.06035279110074043
+ndl_no_replay,"NDL, no replay",47,9,9,0.04409768059849739
+ndl_no_replay,"NDL, no replay",48,1,0,0.011104708537459373
+ndl_no_replay,"NDL, no replay",48,7,1,0.023809688165783882
+ndl_no_replay,"NDL, no replay",48,0,2,0.06602171063423157
+ndl_no_replay,"NDL, no replay",48,2,3,0.05467570573091507
+ndl_no_replay,"NDL, no replay",48,3,4,0.06265003234148026
+ndl_no_replay,"NDL, no replay",48,4,5,0.04948997497558594
+ndl_no_replay,"NDL, no replay",48,5,6,0.06521090865135193
+ndl_no_replay,"NDL, no replay",48,6,7,0.0691598579287529
+ndl_no_replay,"NDL, no replay",48,8,8,0.05896264314651489
+ndl_no_replay,"NDL, no replay",48,9,9,0.041417744010686874
+ndl_no_replay,"NDL, no replay",49,1,0,0.010555475950241089
+ndl_no_replay,"NDL, no replay",49,7,1,0.02349247597157955
+ndl_no_replay,"NDL, no replay",49,0,2,0.05780954286456108
+ndl_no_replay,"NDL, no replay",49,2,3,0.05613236501812935
+ndl_no_replay,"NDL, no replay",49,3,4,0.0601634681224823
+ndl_no_replay,"NDL, no replay",49,4,5,0.054857801645994186
+ndl_no_replay,"NDL, no replay",49,5,6,0.062294360250234604
+ndl_no_replay,"NDL, no replay",49,6,7,0.06722547113895416
+ndl_no_replay,"NDL, no replay",49,8,8,0.061450034379959106
+ndl_no_replay,"NDL, no replay",49,9,9,0.043970830738544464
+ndl_no_replay,"NDL, no replay",50,1,0,0.010426467284560204
+ndl_no_replay,"NDL, no replay",50,7,1,0.02346804365515709
+ndl_no_replay,"NDL, no replay",50,0,2,0.05609539523720741
+ndl_no_replay,"NDL, no replay",50,2,3,0.054011669009923935
+ndl_no_replay,"NDL, no replay",50,3,4,0.059791769832372665
+ndl_no_replay,"NDL, no replay",50,4,5,0.053339455276727676
+ndl_no_replay,"NDL, no replay",50,5,6,0.06086626648902893
+ndl_no_replay,"NDL, no replay",50,6,7,0.06653774529695511
+ndl_no_replay,"NDL, no replay",50,8,8,0.058432068675756454
+ndl_no_replay,"NDL, no replay",50,9,9,0.045965131372213364
+ndl_no_replay,"NDL, no replay",51,1,0,0.01001831516623497
+ndl_no_replay,"NDL, no replay",51,7,1,0.023047389462590218
+ndl_no_replay,"NDL, no replay",51,0,2,0.0581059493124485
+ndl_no_replay,"NDL, no replay",51,2,3,0.060542020946741104
+ndl_no_replay,"NDL, no replay",51,3,4,0.062327515333890915
+ndl_no_replay,"NDL, no replay",51,4,5,0.05659835413098335
+ndl_no_replay,"NDL, no replay",51,5,6,0.06370708346366882
+ndl_no_replay,"NDL, no replay",51,6,7,0.06824392825365067
+ndl_no_replay,"NDL, no replay",51,8,8,0.060947027057409286
+ndl_no_replay,"NDL, no replay",51,9,9,0.04595065116882324

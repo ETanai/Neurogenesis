@@ -1,0 +1,49 @@
+condition,label,metric,mean,std,ci95_low,ci95_high
+cl_dataset_oracle,CL + original data,macro_mse,0.015077127609401941,0.00013499500186765802,0.014980564711693465,0.015173690507110418
+cl_dataset_oracle,CL + original data,foreground_mse,0.0609075604553896,0.000730629002340119,0.0603849362645697,0.0614301846462095
+cl_dataset_oracle,CL + original data,mean_positive_forgetting,9.458300191909074e-06,5.013168428255826e-06,5.872344686625937e-06,1.304425569719221e-05
+cl_dataset_oracle,CL + original data,quota_stop_fraction,0.0,0.0,0.0,0.0
+cl_dataset_oracle,CL + original data,updated_class_fraction,0.0,0.0,0.0,0.0
+cl_dataset_oracle,CL + original data,model_update_steps,1113.0,0.0,1113.0,1113.0
+cl_dataset_oracle,CL + original data,parameter_count,389343.0,0.0,389343.0,389343.0
+cl_dataset_oracle,CL + original data,runtime_seconds,118.34005872081033,114.35084616029611,36.544074366666976,200.1360430749537
+cl_intrinsic,CL + intrinsic replay,macro_mse,0.023672002740204333,0.0005323127154299508,0.023291235618623226,0.02405276986178544
+cl_intrinsic,CL + intrinsic replay,foreground_mse,0.08409888118397298,0.0019880956294728476,0.08267678205254246,0.08552098031540349
+cl_intrinsic,CL + intrinsic replay,mean_positive_forgetting,0.007416342650540172,0.0005009761902893308,0.00705799077122603,0.0077746945298543145
+cl_intrinsic,CL + intrinsic replay,quota_stop_fraction,0.0,0.0,0.0,0.0
+cl_intrinsic,CL + intrinsic replay,updated_class_fraction,0.0,0.0,0.0,0.0
+cl_intrinsic,CL + intrinsic replay,model_update_steps,1113.0,0.0,1113.0,1113.0
+cl_intrinsic,CL + intrinsic replay,parameter_count,463978.0,0.0,463978.0,463978.0
+cl_intrinsic,CL + intrinsic replay,runtime_seconds,85.4876089069061,1.2010222792506793,84.6285090151147,86.3467087986975
+cl_no_replay,"CL, no replay",macro_mse,0.025876427814364434,0.0005734243776911053,0.02546625322448727,0.026286602404241598
+cl_no_replay,"CL, no replay",foreground_mse,0.10956153288426455,0.004218544126159484,0.1065439778689138,0.11257908789961531
+cl_no_replay,"CL, no replay",mean_positive_forgetting,0.008974185180850327,0.0005358513037210116,0.008590886881562974,0.00935748348013768
+cl_no_replay,"CL, no replay",quota_stop_fraction,0.0,0.0,0.0,0.0
+cl_no_replay,"CL, no replay",updated_class_fraction,0.0,0.0,0.0,0.0
+cl_no_replay,"CL, no replay",model_update_steps,1113.0,0.0,1113.0,1113.0
+cl_no_replay,"CL, no replay",parameter_count,390096.7,722.1849639962204,389580.11589066143,390613.2841093386
+cl_no_replay,"CL, no replay",runtime_seconds,79.79784172661603,1.9824495017041464,78.37978131106858,81.21590214216347
+ndl_dataset_oracle,NDL + original data,macro_mse,0.04733276516199112,0.000767552776709684,0.046783729129265,0.047881801194717244
+ndl_dataset_oracle,NDL + original data,foreground_mse,0.1938801354099448,0.011987570403721707,0.18530533990897838,0.20245493091091124
+ndl_dataset_oracle,NDL + original data,mean_positive_forgetting,0.00022195514757186174,8.617043149388419e-05,0.0001603168169172451,0.0002835934782264784
+ndl_dataset_oracle,NDL + original data,quota_stop_fraction,0.875,0.0,0.875,0.875
+ndl_dataset_oracle,NDL + original data,updated_class_fraction,0.2625,0.03952847075210474,0.23422500000000002,0.290775
+ndl_dataset_oracle,NDL + original data,model_update_steps,13674.4,553.2741333793463,13278.63902509641,14070.160974903589
+ndl_dataset_oracle,NDL + original data,parameter_count,390233.0,1258.6500705120545,389332.6785338114,391133.3214661886
+ndl_dataset_oracle,NDL + original data,runtime_seconds,151.9670196450781,33.733072136554064,127.83751004065508,176.09652924950112
+ndl_intrinsic,NDL + intrinsic replay,macro_mse,0.06395278647541999,0.002366347828492076,0.062260120820069514,0.06564545213077047
+ndl_intrinsic,NDL + intrinsic replay,foreground_mse,0.2440153954462987,0.012763343514738432,0.23488568384823458,0.2531451070443628
+ndl_intrinsic,NDL + intrinsic replay,mean_positive_forgetting,0.015306644937954843,0.002333698533699356,0.013637333558464257,0.01697595631744543
+ndl_intrinsic,NDL + intrinsic replay,quota_stop_fraction,0.0,0.0,0.0,0.0
+ndl_intrinsic,NDL + intrinsic replay,updated_class_fraction,1.0,0.0,1.0,1.0
+ndl_intrinsic,NDL + intrinsic replay,model_update_steps,88291.7,7.674633541739957,88286.21027931858,88297.18972068142
+ndl_intrinsic,NDL + intrinsic replay,parameter_count,463978.0,0.0,463978.0,463978.0
+ndl_intrinsic,NDL + intrinsic replay,runtime_seconds,1192.8235495644622,1698.2184898611088,-21.924374835474737,2407.571473964399
+ndl_no_replay,"NDL, no replay",macro_mse,0.04944298379123211,0.0016001195777495065,0.04829840672563798,0.05058756085682624
+ndl_no_replay,"NDL, no replay",foreground_mse,0.19112902121639946,0.01575398842797308,0.17986007975912793,0.202397962673671
+ndl_no_replay,"NDL, no replay",mean_positive_forgetting,0.0018738438328728079,0.00044898366781300386,0.0015526825795820587,0.002195005086163557
+ndl_no_replay,"NDL, no replay",quota_stop_fraction,0.875,0.0,0.875,0.875
+ndl_no_replay,"NDL, no replay",updated_class_fraction,0.3,0.06454972243679029,0.2538271183485371,0.34617288165146287
+ndl_no_replay,"NDL, no replay",model_update_steps,14668.0,954.5711078803926,13985.18840719683,15350.81159280317
+ndl_no_replay,"NDL, no replay",parameter_count,390096.7,722.1849639962204,389580.11589066143,390613.2841093386
+ndl_no_replay,"NDL, no replay",runtime_seconds,91.82703032917343,4.605773658013576,88.53248723902871,95.12157341931814

@@ -1,0 +1,41 @@
+{
+  "complete_json_bundle": "replication_figure_base_data.json",
+  "figures": {
+    "claim_direction_comparison.png": [
+      "mnist_claim_ratios.csv"
+    ],
+    "cross_dataset_effects.png": [
+      "cross_dataset_ratios.csv"
+    ],
+    "mechanism_comparison.png": [
+      "mnist_architecture.csv",
+      "mnist_condition_metrics.csv",
+      "mnist_seed_metrics.csv"
+    ],
+    "per_class_comparison.png": [
+      "mnist_per_class_summary.csv",
+      "mnist_per_class_seed.csv"
+    ],
+    "performance_comparison.png": [
+      "mnist_condition_metrics.csv",
+      "mnist_seed_metrics.csv"
+    ],
+    "sd19_feasibility_comparison.png": [
+      "sd19_plotted_summary.csv",
+      "sd19_seed_metrics.csv",
+      "sd19_per_class_seed.csv"
+    ],
+    "training_resource_comparison.png": [
+      "training_resource_conditions.csv",
+      "training_resource_ratios.csv"
+    ]
+  },
+  "generated_by": "scripts/export_replication_figure_data.py",
+  "notes": [
+    "CSV files use long/tidy form where practical.",
+    "Widths stored in CSV cells are JSON arrays.",
+    "Ratios below one favor NDL for error and forgetting metrics.",
+    "MNIST confidence intervals use two-sided Student-t intervals over seeds 42-51."
+  ],
+  "schema_version": 1
+}

@@ -494,6 +494,30 @@ Primary machine-readable aggregate:
 - [Corrected seed-matched MNIST no-replay control](../outputs/ablations/organic_growth/confirmation_cl_noreplay_seed_matched_correction/summary.json)
 - [Training-resource benchmark](../outputs/benchmarks/training_resources_seed42/summary.json)
 - [Training-resource metadata](../outputs/benchmarks/training_resources_seed42/metadata.json)
+- [Portable figure-data manifest](figures/replication/data/manifest.json)
+- [Complete figure base-data bundle](figures/replication/data/replication_figure_base_data.json)
+
+### Portable diagram data
+
+Every diagram has normalized CSV source tables in
+[`figures/replication/data/`](figures/replication/data/). Observation-level
+tables preserve individual seeds and per-class measurements; summary tables
+preserve the exact means, confidence intervals, and ratios plotted in this
+report. The JSON bundle additionally retains the structured source rows,
+including growth reports and configuration details.
+
+| Diagram | Portable data |
+|---|---|
+| Performance comparison | `mnist_condition_metrics.csv`, `mnist_seed_metrics.csv` |
+| Per-class comparison | `mnist_per_class_summary.csv`, `mnist_per_class_seed.csv` |
+| Capacity and mechanism | `mnist_architecture.csv`, `mnist_condition_metrics.csv`, `mnist_seed_metrics.csv` |
+| Claim direction | `mnist_claim_ratios.csv` |
+| Cross-dataset effects | `cross_dataset_ratios.csv` |
+| SD19 feasibility | `sd19_plotted_summary.csv`, `sd19_seed_metrics.csv`, `sd19_per_class_seed.csv` |
+| Training resources | `training_resource_conditions.csv`, `training_resource_ratios.csv` |
+
+CSV tables use long/tidy form where practical, and architecture-width cells
+are valid JSON arrays. See `manifest.json` for the machine-readable mapping.
 
 Supporting documents and code:
 
@@ -504,6 +528,7 @@ Supporting documents and code:
 - [`run_mnist_noreplay_matched_control.py`](../scripts/run_mnist_noreplay_matched_control.py)
 - [`benchmark_training_resources.py`](../scripts/benchmark_training_resources.py)
 - [`plot_training_resources.py`](../scripts/plot_training_resources.py)
+- [`export_replication_figure_data.py`](../scripts/export_replication_figure_data.py)
 - [`plot_sd19_comparison.py`](../scripts/plot_sd19_comparison.py)
 - [`summarize_confirmation.py`](../scripts/summarize_confirmation.py)
 
@@ -513,6 +538,7 @@ Regenerate the diagrams with:
 .venv/bin/python scripts/plot_replication_report.py
 .venv/bin/python scripts/plot_sd19_comparison.py
 .venv/bin/python scripts/plot_training_resources.py
+.venv/bin/python scripts/export_replication_figure_data.py
 ```
 
 The plotting script verifies that each of the six conditions contains exactly

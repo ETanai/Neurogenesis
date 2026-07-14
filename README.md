@@ -133,12 +133,18 @@ Run the isolated-process training-time and peak-memory benchmark with:
 ```bash
 python scripts/benchmark_training_resources.py --resume
 python scripts/plot_training_resources.py
+python scripts/export_replication_figure_data.py
 ```
 
 It compares each seed-42 NDL variant with an ordinary autoencoder trained
 jointly on all digits at the exact resulting endpoint size. Results include
 wall time, optimizer updates, peak CUDA allocation/reservation, process RSS,
 and final reconstruction error.
+
+Portable source data for every report diagram are saved under
+`docs/figures/replication/data/`. The directory contains normalized CSV tables,
+a complete JSON bundle, and a manifest mapping each PNG to the files needed to
+recreate it in R, Julia, MATLAB, a spreadsheet, or another plotting program.
 
 ## Paper source
 

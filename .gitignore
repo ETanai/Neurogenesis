@@ -22,6 +22,8 @@
 !README.md
 !docs/*.md
 !docs/figures/replication/*.png
+!docs/figures/replication/data/*.csv
+!docs/figures/replication/data/*.json
 !docs/papers/**
 
 __pycache__/
