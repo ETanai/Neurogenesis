@@ -59,6 +59,9 @@ incremental_classes:
   - 59
   - 60
   - 61
+incremental_train_limit_per_class: null     # diagnostic cap for staged feasibility screens
+skip_incremental_training: false            # diagnostic-only base-model evaluation
+control_hidden_sizes: null                  # seed-specific endpoint for matched CL controls
 
 threshold:
   percentile: 0.95                          # percentile cut-off for novelty detection
@@ -69,5 +72,6 @@ evaluation:
   batch_size: null                          # fall back to datamodule batch size
   val_split: true                           # keep a validation split for reporting
 
-model:
-  hidden_sizes: [1000, 500, 250, 50]        # larger AE used for SD-19 per paper protocol
+# The paper presets explicitly override top-level model.hidden_sizes to
+# [1000,500,250,50]. A nested experiment.model value would not configure the
+# model constructed by scripts/run_experiments.py.

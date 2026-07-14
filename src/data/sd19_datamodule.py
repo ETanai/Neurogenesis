@@ -28,6 +28,29 @@ class SD19ImageFolder(ImageFolder):
             img = self.transform(img)
         return img, label
 
+    @classmethod
+    def from_cached_index(cls, root, samples, class_to_idx, transform=None):
+        """Construct an ImageFolder-compatible view without rescanning ``root``."""
+        dataset = cls.__new__(cls)
+        dataset.root = str(root)
+        dataset.transform = transform
+        dataset.target_transform = None
+        dataset.transforms = None
+        # ``__getitem__`` only needs loader/samples/transform. Use the same
+        # default loader selected by ImageFolder without constructing another
+        # directory index.
+        from torchvision.datasets.folder import default_loader
+
+        dataset.loader = default_loader
+        dataset.class_to_idx = dict(class_to_idx)
+        dataset.classes = [
+            name for name, _ in sorted(class_to_idx.items(), key=lambda item: item[1])
+        ]
+        dataset.samples = list(samples)
+        dataset.imgs = dataset.samples
+        dataset.targets = [label for _, label in dataset.samples]
+        return dataset
+
 
 class _ListSampler(Sampler[int]):
     """Sampler that draws from a changing list of indices."""
@@ -199,11 +222,9 @@ class SD19DataModule(pl.LightningDataModule):
 
         samples, class_to_idx = self._build_or_load_index()
 
-        self.full = SD19ImageFolder(self.hparams.data_dir, transform=None)
-        self.full.samples = samples  # <— reuse (no rescan)
-        self.full.imgs = samples  # alias used internally
-        self.full.targets = [lbl for _, lbl in samples]
-        self.full.class_to_idx = class_to_idx
+        self.full = SD19ImageFolder.from_cached_index(
+            self.hparams.data_dir, samples, class_to_idx, transform=None
+        )
         self._build_class_index_cache()
 
         targets = torch.tensor([lbl for _, lbl in self.full.samples], dtype=torch.long)
@@ -335,8 +356,7 @@ class SD19DataModule(pl.LightningDataModule):
         if use_val_transforms is None:
             use_val_transforms = split != "train"
         transform = self.val_tfms if use_val_transforms else self.train_tfms
-        ds = SD19ImageFolder(self.hparams.data_dir, transform=transform)
-        return Subset(ds, lst)
+        return Subset(_TransformedView(self.full, transform), lst)
 
     def get_combined_dataset(
         self,
@@ -358,8 +378,7 @@ class SD19DataModule(pl.LightningDataModule):
         if use_val_transforms is None:
             use_val_transforms = split != "train"
         transform = self.val_tfms if use_val_transforms else self.train_tfms
-        ds = SD19ImageFolder(self.hparams.data_dir, transform=transform)
-        return Subset(ds, idxs)
+        return Subset(_TransformedView(self.full, transform), idxs)
 
     # ---------- transforms ----------
 

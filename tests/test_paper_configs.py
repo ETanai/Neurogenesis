@@ -63,6 +63,14 @@ def test_sd19_growth_config_requests_twenty_shuffled_curricula():
     assert "replay.mode=dataset" in data["runs"][0]["overrides"]
 
 
+@pytest.mark.parametrize(
+    "filename", ["sd19_ndl.yaml", "sd19_ndl_ir.yaml", "sd19_growth_20.yaml"]
+)
+def test_sd19_paper_configs_resolve_published_architecture(filename):
+    for _, cfg in _resolved_runs(filename):
+        assert list(cfg.model.hidden_sizes) == [1000, 500, 250, 50]
+
+
 def test_ir_validation_rejects_dataset_replay_label():
     cfg = _compose_cfg(
         [

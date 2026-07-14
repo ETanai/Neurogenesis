@@ -75,6 +75,7 @@ PAPER_EXPERIMENTS: tuple[PaperExperiment, ...] = (
         overrides=(
             "data=sd19",
             "experiment=sd19_incremental",
+            "model.hidden_sizes=[1000,500,250,50]",
             "experiment.regime=ndl",
             "replay.enabled=true",
             "replay.mode=dataset",
@@ -82,13 +83,16 @@ PAPER_EXPERIMENTS: tuple[PaperExperiment, ...] = (
     ),
     PaperExperiment(
         name="sd19_ndl_ir",
-        description="SD-19 neurogenesis with dataset-based replay enabled for comparison.",
+        description="SD-19 neurogenesis with isolated intrinsic replay.",
         overrides=(
             "data=sd19",
             "experiment=sd19_incremental",
+            "model.hidden_sizes=[1000,500,250,50]",
             "experiment.regime=ndl_ir",
             "replay.enabled=true",
-            "replay.mode=dataset",
+            "replay.mode=intrinsic",
+            "replay.reuse_previous_stats=true",
+            "replay.ir_sampling_mode=gaussian_full",
         ),
     ),
 )
