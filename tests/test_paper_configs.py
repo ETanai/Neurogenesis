@@ -5,6 +5,7 @@ from omegaconf import OmegaConf
 
 from scripts.run_paper_config import _compose_cfg, _validate_paper_run
 from scripts.run_experiments import _neurogenesis_early_stop_cfg, _replay_refresh_plan
+from scripts.run_paper_experiments import PAPER_EXPERIMENTS
 
 
 PAPER_DIR = Path(__file__).resolve().parents[1] / "config" / "paper"
@@ -69,6 +70,19 @@ def test_sd19_growth_config_requests_twenty_shuffled_curricula():
 def test_sd19_paper_configs_resolve_published_architecture(filename):
     for _, cfg in _resolved_runs(filename):
         assert list(cfg.model.hidden_sizes) == [1000, 500, 250, 50]
+
+
+def test_legacy_sd19_runner_uses_published_architecture_and_intrinsic_replay():
+    sd19 = {
+        experiment.name: experiment
+        for experiment in PAPER_EXPERIMENTS
+        if experiment.name.startswith("sd19_")
+    }
+    assert set(sd19) == {"sd19_ndl", "sd19_ndl_ir"}
+    for experiment in sd19.values():
+        assert "model.hidden_sizes=[1000,500,250,50]" in experiment.overrides
+    assert "replay.mode=intrinsic" in sd19["sd19_ndl_ir"].overrides
+    assert "replay.reuse_previous_stats=true" in sd19["sd19_ndl_ir"].overrides
 
 
 def test_ir_validation_rejects_dataset_replay_label():

@@ -26,6 +26,7 @@ AGGREGATE = (
     / "summary.json"
 )
 RUN_ROOT = ROOT / "outputs" / "ablations" / "organic_growth"
+SD19_SUMMARY = ROOT / "outputs" / "sd19" / "feasibility_screen" / "summary.json"
 
 LABELS = {
     "cl_dataset_oracle": "CL + original data",
@@ -73,7 +74,10 @@ def _raw_conditions() -> dict[str, list[dict[str, Any]]]:
     return {
         "cl_dataset_oracle": _completed(controls, "cl_dataset_oracle_matched"),
         "cl_intrinsic": _completed(controls, "cl_intrinsic_matched"),
-        "cl_no_replay": _completed(controls, "cl_no_replay_matched"),
+        "cl_no_replay": _completed(
+            RUN_ROOT / "confirmation_cl_noreplay_seed_matched_correction" / "summary.json",
+            "cl_no_replay_seed_matched",
+        ),
         "ndl_dataset_oracle": [
             *_completed(RUN_ROOT / "full_threshold_refresh_seeds42_46" / "summary.json"),
             *_completed(
@@ -284,6 +288,52 @@ def claim_direction_figure(aggregate: dict[str, dict[str, Any]]) -> None:
     plt.close(fig)
 
 
+def cross_dataset_figure(aggregate: dict[str, dict[str, Any]]) -> None:
+    sd19_rows = _completed(SD19_SUMMARY)
+    sd19 = {
+        condition: [row for row in sd19_rows if row["condition"] == condition]
+        for condition in ("cl_dataset", "ndl_dataset")
+    }
+    if any(sorted(int(row["seed"]) for row in rows) != [42, 43, 44] for rows in sd19.values()):
+        raise ValueError("Cross-dataset figure requires all three paired SD19 seeds")
+
+    labels = ["MNIST\noriginal data", "MNIST\nintrinsic replay", "MNIST\nno replay", "SD19 screen\noriginal data"]
+    suffixes = ["dataset_oracle", "intrinsic", "no_replay"]
+    metrics = [
+        ("macro_mse", "Reconstruction error", False),
+        ("mean_positive_forgetting", "Positive forgetting", True),
+        ("model_update_steps", "Incremental optimizer updates", True),
+    ]
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4.5))
+    for axis, (metric, title, log_scale) in zip(axes, metrics):
+        ratios = [
+            aggregate[f"ndl_{suffix}"]["metrics"][metric]["mean"]
+            / aggregate[f"cl_{suffix}"]["metrics"][metric]["mean"]
+            for suffix in suffixes
+        ]
+        sd_cl = statistics.fmean(float(row[metric]) for row in sd19["cl_dataset"])
+        sd_ndl = statistics.fmean(float(row[metric]) for row in sd19["ndl_dataset"])
+        ratios.append(sd_ndl / sd_cl)
+        colors = ["#59A14F" if value < 1 else "#E15759" for value in ratios]
+        axis.bar(np.arange(4), ratios, color=colors)
+        axis.axhline(1.0, color="#222", linestyle="--", linewidth=1)
+        for index, value in enumerate(ratios):
+            axis.text(index, value * (1.10 if log_scale else 1.03), f"{value:.2f}×", ha="center")
+        if log_scale:
+            axis.set_yscale("log")
+            axis.set_ylim(min(0.2, min(ratios) * 0.7), max(ratios) * 1.7)
+        else:
+            axis.set_ylim(0, max(ratios) * 1.22)
+        axis.set_xticks(np.arange(4), labels, rotation=20, ha="right")
+        axis.set_title(title)
+        axis.set_ylabel("NDL / matched CL; below 1 favors NDL")
+        axis.grid(axis="y", alpha=0.25)
+    fig.suptitle("Cross-dataset effect direction", fontsize=14, y=1.02)
+    fig.tight_layout()
+    fig.savefig(OUTPUT / "cross_dataset_effects.png")
+    plt.close(fig)
+
+
 def main() -> None:
     OUTPUT.mkdir(parents=True, exist_ok=True)
     _style()
@@ -297,6 +347,7 @@ def main() -> None:
     per_class_figure(raw)
     mechanism_figure(aggregate, raw)
     claim_direction_figure(aggregate)
+    cross_dataset_figure(aggregate)
 
 
 if __name__ == "__main__":

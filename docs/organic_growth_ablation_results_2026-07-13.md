@@ -147,7 +147,7 @@ NDL endpoint. Intervals are two-sided 95% Student-t intervals.
 |---|---:|---:|---:|---:|---|
 | CL, dataset oracle | 0.01508 [0.01498, 0.01517] | 0.06091 [0.06038, 0.06143] | n/a | n/a | `[207,105,77,23]` |
 | CL, intrinsic replay | 0.02367 [0.02329, 0.02405] | 0.08410 [0.08268, 0.08552] | n/a | n/a | `[232,140,91,44]` |
-| CL, no replay | 0.01743 [0.01730, 0.01757] | 0.07606 [0.07448, 0.07764] | n/a | n/a | `[232,140,91,44]` |
+| CL, no replay | 0.02588 [0.02547, 0.02629] | 0.10956 [0.10654, 0.11258] | n/a | n/a | seed-matched near `[207,106,78,23]` |
 | NDL, dataset oracle | 0.04733 [0.04678, 0.04788] | 0.19388 [0.18531, 0.20245] | 0.875 | 0.263 | `[207--209,105,77,23]` |
 | NDL, intrinsic replay | 0.06395 [0.06226, 0.06565] | 0.24402 [0.23489, 0.25315] | 0.000 | 1.000 | `[232,140,91,44]` |
 | NDL, no replay | 0.04944 [0.04830, 0.05059] | 0.19113 [0.17986, 0.20240] | 0.875 | 0.300 | seed-varying near `[207,106,78,23]` |
@@ -166,6 +166,14 @@ ordering: NDL+IR macro MSE is 170.2% higher than CL+IR (`0.06395` versus
 `0.00742`). NDL also underperforms matched CL with the clean oracle and without
 replay. The paper's central comparative MNIST result therefore does **not**
 replicate in this implementation.
+
+The no-replay CL row was corrected after the initial report: the first control
+used the larger intrinsic-replay endpoint. Ten reruns now use each no-replay
+NDL seed's exact endpoint. The correction reduces the NDL/CL macro-MSE ratio
+from the confounded `2.84x` to `1.91x` and shows a real retention trade-off:
+NDL has `0.21x` the positive forgetting of matched CL, but substantially worse
+total reconstruction. Clean-replay and intrinsic-replay comparisons were
+already capacity matched and are unchanged.
 
 ## Final decision
 

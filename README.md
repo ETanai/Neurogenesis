@@ -117,6 +117,29 @@ The final ten-seed comparison, diagrams, fidelity assessment, and replication
 verdict are collected in
 `docs/full_replication_report_2026-07-14.md`.
 
+Run the paired SD19 feasibility gate with:
+
+```bash
+python scripts/run_sd19_comparison.py --stage screen --seeds 42,43,44 --quiet --resume
+```
+
+The full SD19 stage refuses to run unless the screen gate passes; `--force-full`
+is reserved for an explicitly non-promoted diagnostic. SD19 paper runs now
+resolve the published `[1000,500,250,50]` architecture at the top-level model
+configuration.
+
+Run the isolated-process training-time and peak-memory benchmark with:
+
+```bash
+python scripts/benchmark_training_resources.py --resume
+python scripts/plot_training_resources.py
+```
+
+It compares each seed-42 NDL variant with an ordinary autoencoder trained
+jointly on all digits at the exact resulting endpoint size. Results include
+wall time, optimizer updates, peak CUDA allocation/reservation, process RSS,
+and final reconstruction error.
+
 ## Paper source
 
 The original arXiv v2 source bundle is preserved in
