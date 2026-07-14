@@ -12,6 +12,9 @@ threshold:
   percentile: 0.985                          # percentile cut-off for novelty detection
   margin: 0.0                               # additive margin for the percentile threshold
   minimum: 1.0e-04                          # never allow thresholds below this value
+  refresh_before_class: false               # diagnostic: recalibrate on already learned classes only
+  refresh_source: dataset                   # dataset clean oracle, or replay for old-data isolation
+  refresh_samples_per_class: 1024           # replay samples/class used for threshold calibration
 
 evaluation:
   batch_size: null                          # fall back to datamodule batch size

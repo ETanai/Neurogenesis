@@ -517,13 +517,26 @@ The final `[225,135,83,40]` shape is therefore currently cap-driven rather than
 shown to be demand-emergent. The Phase 2D study is required before interpreting
 the layer-growth result.
 
-The clean-replay gate against a
-capacity-matched CL control, five-seed IR gate, ten-seed MNIST confirmation,
-and SD-19 curriculum remain unexecuted. Accordingly, the current result is:
+## Completed confirmation update (2026-07-14)
 
-- a completed full-curriculum evaluation of a model whose updates stop early,
-  with an original-data replay oracle outperforming the matched no-replay run;
-- a three-seed reproducible failure of the tested literal Gaussian IR configuration;
-- no evidence yet that the reported final shape emerged independently of its
-  growth caps;
-- no claim yet that the paper's comparative NDL-versus-CL results replicate.
+The capacity-matched controls, five-seed IR gate, and ten-seed MNIST
+confirmation are now complete. Learned-class threshold refresh was frozen as
+the paper-compatible undocumented-detail candidate after mechanism screens.
+All six conditions completed seeds 42--51.
+
+- NDL dataset-oracle MSE: `0.04733` (95% CI `[0.04678,0.04788]`).
+- NDL intrinsic-replay MSE: `0.06395` (`[0.06226,0.06565]`).
+- NDL no-replay MSE: `0.04944` (`[0.04830,0.05059]`).
+- Matched CL dataset-oracle MSE: `0.01508` (`[0.01498,0.01517]`).
+- Matched CL intrinsic-replay MSE: `0.02367` (`[0.02329,0.02405]`).
+- Matched CL no-replay MSE: `0.01743` (`[0.01730,0.01757]`).
+
+Clean NDL and no-replay NDL produce seed-varying funnels near
+`[207,106,78,23]`, but update only 26.3% and 30.0% of incoming classes on
+average. Intrinsic NDL instead exhausts all 32 class/level allowances in every
+seed and ends exactly at `[232,140,91,44]`. NDL+IR is 170.2% worse in macro MSE
+than matched CL+IR, reversing the paper's reported ordering. The MNIST
+replication therefore fails. The conditional SD-19 expansion is not activated.
+
+Full estimates and source manifests are in
+`outputs/ablations/organic_growth/confirmation_10seed_aggregate/summary.json`.

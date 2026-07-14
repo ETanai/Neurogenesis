@@ -22,6 +22,12 @@ The paper also leaves important choices unspecified. Without the original
 authors' code, optimizer, activations, phase lengths, thresholds, outlier quota,
 and new-node-count policy cannot be reconstructed exactly from the publication.
 
+The experiment regime is authoritative over replay construction. The
+documented `ndl` and `cl` controls create no replay object even if a stale
+backend field says `replay.mode=dataset`; regression tests cover this case.
+Previously, selecting the dataset backend could silently enable clean replay
+in those no-replay controls, which made their labels unreliable.
+
 ## Operation-by-operation mapping
 
 | Published operation | Implementation | Status |

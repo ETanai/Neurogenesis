@@ -1,4 +1,3 @@
-from copy import deepcopy
 from functools import partial
 from typing import Callable, Dict, List, Optional, Union
 from typing import cast
@@ -188,7 +187,10 @@ class NGAutoEncoder(nn.Module):
             out = module(out)
 
         if ret_lat:
-            lat = deepcopy(out)
+            # ``deepcopy`` fails for non-leaf tensors on current PyTorch. A
+            # clone preserves the value (and gradients for callers that need
+            # them) without sharing storage with the continuing decode path.
+            lat = out.clone()
 
         # decode from the corresponding mirror layer
         n = len(self.hidden_sizes)

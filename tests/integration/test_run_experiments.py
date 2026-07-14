@@ -99,6 +99,56 @@ def test_run_pipeline_with_toy_data(regime, expect_replay):
         assert "foreground_mse" in result["eval_records"][-1]
 
 
+@pytest.mark.parametrize("regime", ["ndl", "cl"])
+def test_no_replay_regimes_stay_replay_free_with_dataset_backend(regime):
+    cfg = make_toy_cfg()
+    cfg.experiment.regime = regime
+    cfg.replay.mode = "dataset"
+    cfg.replay.enabled = True
+
+    result = run(cfg)
+
+    assert result["replay"] is None
+    assert result["trainer"].ir is None
+
+
+def test_threshold_refresh_uses_only_previously_learned_classes():
+    cfg = make_toy_cfg()
+    cfg.experiment.incremental_classes = [1, 2]
+    cfg.experiment.threshold.refresh_before_class = True
+
+    result = run(cfg)
+    history = result["threshold_history"]
+
+    assert [entry["stage"] for entry in history] == [
+        "initial",
+        "before_class",
+        "before_class",
+    ]
+    assert history[1]["class_id"] == 1
+    assert history[1]["calibration_classes"] == [0]
+    assert history[2]["class_id"] == 2
+    assert history[2]["calibration_classes"] == [0, 1]
+    assert result["trainer"].thresholds == history[-1]["thresholds"]
+
+
+def test_threshold_refresh_can_use_intrinsic_replay_without_old_class_refits():
+    cfg = make_toy_cfg()
+    cfg.experiment.incremental_classes = [1, 2]
+    cfg.experiment.threshold.refresh_before_class = True
+    cfg.experiment.threshold.refresh_source = "replay"
+    cfg.experiment.threshold.refresh_samples_per_class = 8
+    cfg.replay.mode = "intrinsic"
+    cfg.replay.reuse_previous_stats = True
+
+    result = run(cfg)
+    refreshed = result["threshold_history"][1:]
+
+    assert [entry["source"] for entry in refreshed] == ["replay", "replay"]
+    assert refreshed[0]["calibration_classes"] == [0]
+    assert refreshed[1]["calibration_classes"] == [0, 1]
+
+
 def test_cl_control_hidden_sizes_override_experiment_model():
     cfg = make_toy_cfg()
     cfg.experiment.regime = "cl_ir"

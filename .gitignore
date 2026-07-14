@@ -21,6 +21,7 @@
 !.gitignore
 !README.md
 !docs/*.md
+!docs/figures/replication/*.png
 !docs/papers/**
 
 __pycache__/

@@ -1,12 +1,14 @@
-"""Run paper-compatible organic-growth and cap-invariance experiments.
+"""Run organic-growth ablations and explicitly labelled confirmation controls.
 
-All conditions use original-data replay. Architecture resemblance is reported
-afterward and is never part of candidate selection or training.
+Architecture resemblance is reported afterward and is never part of candidate
+selection or training.  Replay provenance is encoded in confirmation run names
+and overrides; it must never be inferred from an output directory name.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import datetime as dt
 import json
@@ -47,6 +49,9 @@ BASE_OVERRIDES = (
     "neurogenesis.shape_pressure_mode=none",
     "neurogenesis.max_outlier_fraction=0.1",
     "neurogenesis.unresolved_outlier_action=record",
+    "neurogenesis.outlier_criterion_diagnostics.enabled=true",
+    "neurogenesis.outlier_criterion_diagnostics.levels=[]",
+    "neurogenesis.outlier_criterion_diagnostics.percentiles=[0.5,0.9,0.95,0.985,0.995]",
     "training.base_lr=0.001",
     "training.pretrain_epochs=50",
     "training.pretrain_mode=stacked_denoising",
@@ -75,6 +80,7 @@ class OrganicGrowthSpec:
     description: str
     overrides: tuple[str, ...]
     paired_to: str | None = None
+    base_checkpoint_group: str | None = None
 
 
 def _policy_overrides(
@@ -213,6 +219,133 @@ def full_specs() -> list[OrganicGrowthSpec]:
     return result
 
 
+def confirmation_specs() -> list[OrganicGrowthSpec]:
+    """Frozen full-curriculum matrix for replay and classical controls.
+
+    ``dataset_oracle`` deliberately retains original old-class images and is
+    the clean upper bound requested for debugging.  ``intrinsic`` isolates old
+    data after base training.  ``no_replay`` has no replay object at all.
+    Classical controls are parameter-matched to the corresponding final NDL
+    architecture observed in the five-seed pilot.
+    """
+    full_order = "experiment.incremental_classes=" + str(
+        PUBLISHED_INCREMENTAL_ORDER
+    ).replace(" ", "")
+    normalized_growth = (
+        full_order,
+        "training.incremental_epochs=3",
+        "neurogenesis.plasticity_epochs=3",
+        "neurogenesis.stability_epochs=11",
+        "neurogenesis.next_layer_epochs=3",
+        "model.activation=sigmoid",
+        "model.activation_latent=identity",
+    )
+    organic_policy = _policy_overrides(
+        mode="absolute", absolute_nodes=1, class_limit=[4, 5, 2, 3]
+    )
+    refresh = (
+        "experiment.threshold.refresh_before_class=true",
+        "experiment.threshold.refresh_samples_per_class=1024",
+    )
+    return [
+        OrganicGrowthSpec(
+            "confirmation",
+            "ndl_dataset_oracle_refresh",
+            "ndl_dataset_oracle",
+            "NDL with original-data replay and clean learned-class threshold refresh.",
+            (
+                *normalized_growth,
+                *organic_policy,
+                *refresh,
+                "experiment.regime=ndl_ir",
+                "replay.enabled=true",
+                "replay.mode=dataset",
+                "experiment.threshold.refresh_source=dataset",
+            ),
+            base_checkpoint_group="ndl_200_sigmoid",
+        ),
+        OrganicGrowthSpec(
+            "confirmation",
+            "ndl_intrinsic_refresh",
+            "ndl_intrinsic",
+            "NDL with intrinsic replay only after base training and replay-sourced refresh.",
+            (
+                *normalized_growth,
+                *organic_policy,
+                *refresh,
+                "experiment.regime=ndl_ir",
+                "replay.enabled=true",
+                "replay.mode=intrinsic",
+                "replay.reuse_previous_stats=true",
+                "experiment.threshold.refresh_source=replay",
+            ),
+            base_checkpoint_group="ndl_200_sigmoid",
+        ),
+        OrganicGrowthSpec(
+            "confirmation",
+            "ndl_no_replay_refresh",
+            "ndl_no_replay",
+            "NDL without replay; clean learned-class data is used only to refresh thresholds.",
+            (
+                *normalized_growth,
+                *organic_policy,
+                *refresh,
+                "experiment.regime=ndl",
+                "replay.enabled=false",
+                "replay.mode=dataset",
+                "experiment.threshold.refresh_source=dataset",
+            ),
+            base_checkpoint_group="ndl_200_sigmoid",
+        ),
+        OrganicGrowthSpec(
+            "confirmation",
+            "cl_dataset_oracle_matched",
+            "cl_dataset_oracle",
+            "Classical learning with original-data replay, matched to clean NDL widths.",
+            (
+                *normalized_growth,
+                "experiment.regime=cl_ir",
+                "experiment.control_hidden_sizes=[207,105,77,23]",
+                "replay.enabled=true",
+                "replay.mode=dataset",
+            ),
+            paired_to="ndl_dataset_oracle_refresh",
+            base_checkpoint_group="cl_207_sigmoid",
+        ),
+        OrganicGrowthSpec(
+            "confirmation",
+            "cl_intrinsic_matched",
+            "cl_intrinsic",
+            "Classical learning with intrinsic replay, matched to intrinsic NDL widths.",
+            (
+                *normalized_growth,
+                "experiment.regime=cl_ir",
+                "experiment.control_hidden_sizes=[232,140,91,44]",
+                "replay.enabled=true",
+                "replay.mode=intrinsic",
+                "replay.reuse_previous_stats=true",
+            ),
+            paired_to="ndl_intrinsic_refresh",
+            base_checkpoint_group="cl_232_sigmoid",
+        ),
+        OrganicGrowthSpec(
+            "confirmation",
+            "cl_no_replay_matched",
+            "cl_no_replay",
+            "Classical learning without replay, matched to intrinsic NDL widths.",
+            (
+                *normalized_growth,
+                "experiment.regime=cl",
+                "experiment.control_hidden_sizes=[232,140,91,44]",
+                "replay.enabled=false",
+                "replay.mode=dataset",
+            ),
+            paired_to="ndl_no_replay_refresh",
+            base_checkpoint_group="cl_232_sigmoid",
+        ),
+    ]
+
+
 def specs_for_stage(stage: str) -> list[OrganicGrowthSpec]:
     specs: list[OrganicGrowthSpec] = []
     if stage in {"screen", "all"}:
@@ -221,6 +354,8 @@ def specs_for_stage(stage: str) -> list[OrganicGrowthSpec]:
         specs.extend(invariance_specs())
     if stage in {"full", "all"}:
         specs.extend(full_specs())
+    if stage == "confirmation":
+        specs.extend(confirmation_specs())
     return specs
 
 
@@ -237,6 +372,7 @@ def _final_top_records(eval_records: Sequence[dict[str, Any]]) -> list[dict[str,
 
 def summarize_result(result: dict[str, Any]) -> dict[str, Any]:
     model = result["model"]
+    training_stats = result["training_stats"]
     reports = list(result.get("growth_reports", {}).values())
     level_reports = [level for report in reports for level in report.get("levels", [])]
     final_records = _final_top_records(result.get("eval_records", []))
@@ -304,7 +440,16 @@ def summarize_result(result: dict[str, Any]) -> dict[str, Any]:
             bool(level.get("unresolved_outliers")) and bool(level.get("budget_exhausted"))
             for level in level_reports
         ),
-        "model_update_steps": int(result["training_stats"].get("neurogenesis_parameter_updates", 0)),
+        "model_update_steps": int(
+            training_stats.get("neurogenesis_parameter_updates", 0)
+            or training_stats.get("incremental_parameter_updates", 0)
+        ),
+        "neurogenesis_parameter_updates": int(
+            training_stats.get("neurogenesis_parameter_updates", 0)
+        ),
+        "incremental_parameter_updates": int(
+            training_stats.get("incremental_parameter_updates", 0)
+        ),
         "parameter_count": sum(parameter.numel() for parameter in model.parameters()),
         "growth_reports": result.get("growth_reports", {}),
     }
@@ -466,7 +611,7 @@ def _write_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
             writer.writerow(csv_row)
     lines = [
         "# Organic Growth Ablation", "",
-        "All runs use original-data replay and no shape pressure.", "",
+        "Replay provenance is explicit in each confirmation run name and override manifest.", "",
         "| Stage | Run | Seed | MSE | Foreground MSE | Widths | Quota stops | Updated classes | Unresolved exhausted |",
         "|---|---|---:|---:|---:|---|---:|---:|---:|",
     ]
@@ -493,10 +638,21 @@ def _parse_seeds(value: str) -> list[int]:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stage", choices=("screen", "invariance", "full", "all"), default="screen")
+    parser.add_argument(
+        "--stage",
+        choices=("screen", "invariance", "full", "confirmation", "all"),
+        default="screen",
+    )
     parser.add_argument("--seeds", type=_parse_seeds, default=[42, 43, 44])
     parser.add_argument("--only", default=None)
     parser.add_argument("--quick", action="store_true")
+    parser.add_argument("--quiet", action="store_true")
+    parser.add_argument("--no-base-checkpoint-cache", action="store_true")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Keep completed rows in an existing summary and skip those identities.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--override", action="append", default=[])
     parser.add_argument("--output-dir", type=Path, default=None)
@@ -511,10 +667,56 @@ def main() -> None:
     )
     specs = _selected(specs_for_stage(args.stage), args.only)
     rows: list[dict[str, Any]] = []
+    summary_path = output_dir / "summary.json"
+    if args.resume and summary_path.is_file():
+        loaded = json.loads(summary_path.read_text(encoding="utf-8"))
+        if not isinstance(loaded, list):
+            raise ValueError(f"Expected a list in {summary_path}")
+        rows = loaded
+    completed = {
+        (str(row.get("stage")), str(row.get("name")), int(row.get("seed", -1)))
+        for row in rows
+        if row.get("status") == "completed"
+    }
     extra = (*(_quick_overrides() if args.quick else ()), *tuple(args.override))
+    checkpoint_dir = output_dir / "base_checkpoints"
+    if not args.no_base_checkpoint_cache:
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
     for spec in specs:
         for seed in args.seeds:
-            overrides = (*BASE_OVERRIDES, *spec.overrides, f"seed={seed}", *extra)
+            run_key = (spec.stage, spec.name, int(seed))
+            if run_key in completed:
+                print(f"=== skipping completed {spec.stage}/{spec.name}/seed_{seed} ===")
+                continue
+            rows = [
+                row
+                for row in rows
+                if (
+                    str(row.get("stage")),
+                    str(row.get("name")),
+                    int(row.get("seed", -1)),
+                )
+                != run_key
+            ]
+            checkpoint_overrides: tuple[str, ...] = ()
+            if not args.no_base_checkpoint_cache:
+                group = spec.base_checkpoint_group or "shared"
+                checkpoint_path = (checkpoint_dir / f"{group}_seed_{seed}.pt").resolve()
+                if checkpoint_path.exists():
+                    checkpoint_overrides = (
+                        f"training.base_checkpoint={checkpoint_path.as_posix()}",
+                    )
+                else:
+                    checkpoint_overrides = (
+                        f"training.base_checkpoint_out={checkpoint_path.as_posix()}",
+                    )
+            overrides = (
+                *BASE_OVERRIDES,
+                *spec.overrides,
+                f"seed={seed}",
+                *checkpoint_overrides,
+                *extra,
+            )
             print(f"\n=== {spec.stage}/{spec.name}/seed_{seed} ===")
             print(spec.description)
             print(" ".join(overrides))
@@ -536,7 +738,19 @@ def main() -> None:
                 cfg.paper_experiment = f"organic_growth/{spec.stage}/{spec.name}/seed_{seed}"
             try:
                 started = time.perf_counter()
-                summary = summarize_result(run(cfg))
+                if args.quiet:
+                    log_dir = output_dir / "logs"
+                    log_dir.mkdir(parents=True, exist_ok=True)
+                    log_path = log_dir / f"{spec.stage}_{spec.name}_seed_{seed}.log"
+                    with log_path.open("w", encoding="utf-8") as handle:
+                        with contextlib.redirect_stdout(handle), contextlib.redirect_stderr(
+                            handle
+                        ):
+                            run_result = run(cfg)
+                    identity["log_path"] = str(log_path)
+                else:
+                    run_result = run(cfg)
+                summary = summarize_result(run_result)
                 summary["runtime_seconds"] = time.perf_counter() - started
                 rows.append({**identity, "status": "completed", **summary})
             except Exception as exc:

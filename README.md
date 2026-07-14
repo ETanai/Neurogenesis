@@ -90,10 +90,32 @@ python scripts/run_organic_growth_ablation.py --stage screen --seeds 42,43,44
 python scripts/run_organic_growth_ablation.py --stage all --seeds 42,43,44
 ```
 
-Use `--dry-run` to inspect the resolved matrix or `--quick` for a smoke test.
-The runner writes JSON, CSV, and Markdown summaries under
+The frozen full-curriculum confirmation matrix labels dataset-oracle,
+intrinsic-replay, and no-replay conditions explicitly:
+
+```bash
+python scripts/run_organic_growth_ablation.py \
+  --stage confirmation --seeds 42,43,44,45,46,47,48,49,50,51 \
+  --quiet --resume
+```
+
+Use `--dry-run` to inspect the resolved matrix, `--quick` for a smoke test, or
+`--quiet` to redirect each run's training output to its result directory.
+`--resume` preserves completed condition/seed identities in an existing result
+directory. Base checkpoints are cached by matched-architecture group and seed
+so paired conditions share the same pretrained starting point without loading
+an incompatible control architecture; pass `--no-base-checkpoint-cache` to opt
+out. The runner writes JSON, CSV, and Markdown summaries under
 `outputs/ablations/organic_growth/`, including cap-invariance, update-coverage,
 outlier-stop, foreground-MSE, forgetting, capacity, and runtime evidence.
+Use `scripts/summarize_confirmation.py` to merge completed manifests; it rejects
+duplicate seeds and reports sample standard deviations and two-sided 95%
+Student-t intervals.
+The completed seed-42 successive-halving campaign is summarized in
+`docs/organic_growth_ablation_results_2026-07-13.md`.
+The final ten-seed comparison, diagrams, fidelity assessment, and replication
+verdict are collected in
+`docs/full_replication_report_2026-07-14.md`.
 
 ## Paper source
 

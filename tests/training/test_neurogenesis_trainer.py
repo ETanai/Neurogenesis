@@ -227,6 +227,39 @@ def test_outlier_criterion_diagnostics_logs_pixel_local_overlap():
     assert logger.metrics[f"{prefix}/local_topk_fraction"] == pytest.approx(0.5)
     assert logger.metrics[f"{prefix}/overlap_fraction_of_pixel"] == pytest.approx(0.0)
     assert logger.metrics[f"{prefix}/jaccard"] == pytest.approx(0.0)
+    stored = trainer._latest_outlier_stats[("7", 0, 3)]
+    assert stored["effective_threshold"] == pytest.approx(0.5)
+    assert stored["pixel_p500"] == pytest.approx(0.55)
+    assert stored["local_mean"] == pytest.approx(0.5)
+    assert stored["pixel_local_corr"] < 0.0
+
+
+def test_get_outliers_preserves_sample_identity_with_shuffled_subset_loader():
+    class AE:
+        hidden_sizes = [1]
+
+        def forward_partial(self, x, level):
+            return x.view(x.size(0), -1)
+
+        @staticmethod
+        def reconstruction_error(x_hat, x):
+            return x_hat.view(x_hat.size(0), -1).mean(dim=1)
+
+    x = torch.arange(8, dtype=torch.float32).view(-1, 1)
+    y = torch.zeros(8, dtype=torch.long)
+    source = TensorDataset(x, y)
+    domain = torch.utils.data.Subset(source, [1, 3, 5, 7])
+    loader = DataLoader(domain, batch_size=2, shuffle=True)
+    trainer = NeurogenesisTrainer(
+        AE(), None, thresholds=[4.0], max_nodes=[1], max_outliers=0.1
+    )
+
+    n_outliers, outlier_loader, total = trainer._get_outliers(loader, level=0)
+    selected = torch.cat([batch[0].view(-1) for batch in outlier_loader]).tolist()
+
+    assert total == 4
+    assert n_outliers == 2
+    assert selected == [5.0, 7.0]
 
 
 def test_threshold_goal_config_injection():

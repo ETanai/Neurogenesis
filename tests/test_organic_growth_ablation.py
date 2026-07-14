@@ -3,6 +3,7 @@ import pytest
 from scripts.run_organic_growth_ablation import (
     BASE_OVERRIDES,
     annotate_comparisons,
+    confirmation_specs,
     full_specs,
     invariance_specs,
     screen_specs,
@@ -52,6 +53,34 @@ def test_full_specs_restore_published_curriculum():
     )
 
 
+def test_confirmation_matrix_labels_replay_provenance_and_no_replay_controls():
+    specs = {spec.name: spec for spec in confirmation_specs()}
+
+    assert set(specs) == {
+        "ndl_dataset_oracle_refresh",
+        "ndl_intrinsic_refresh",
+        "ndl_no_replay_refresh",
+        "cl_dataset_oracle_matched",
+        "cl_intrinsic_matched",
+        "cl_no_replay_matched",
+    }
+    assert "experiment.threshold.refresh_source=dataset" in specs[
+        "ndl_dataset_oracle_refresh"
+    ].overrides
+    assert "experiment.threshold.refresh_source=replay" in specs[
+        "ndl_intrinsic_refresh"
+    ].overrides
+    assert "replay.reuse_previous_stats=true" in specs[
+        "ndl_intrinsic_refresh"
+    ].overrides
+    assert "experiment.regime=ndl" in specs["ndl_no_replay_refresh"].overrides
+    assert "replay.enabled=false" in specs["ndl_no_replay_refresh"].overrides
+    assert "experiment.regime=cl" in specs["cl_no_replay_matched"].overrides
+    assert specs["cl_dataset_oracle_matched"].base_checkpoint_group != specs[
+        "cl_intrinsic_matched"
+    ].base_checkpoint_group
+
+
 class _Model:
     hidden_sizes = [225, 130, 82, 38]
 
@@ -85,7 +114,10 @@ def test_summary_reports_organicity_and_performance_metrics():
                 ],
             },
         },
-        "training_stats": {"neurogenesis_parameter_updates": 14},
+        "training_stats": {
+            "neurogenesis_parameter_updates": 14,
+            "incremental_parameter_updates": 0,
+        },
         "eval_records": [
             {"step": 2, "scope": "class", "class_id": 1, "layer": 3, "mean": 0.02},
             {"step": 3, "scope": "aggregate", "class_id": "", "layer": 3, "mean": 0.03, "foreground_mse": 0.2},
@@ -102,6 +134,23 @@ def test_summary_reports_organicity_and_performance_metrics():
     assert summary["updated_class_fraction"] == 1.0
     assert summary["unresolved_exhausted_level_count"] == 1
     assert summary["mean_positive_forgetting"] == pytest.approx(0.005)
+
+
+def test_summary_uses_classical_incremental_update_counter():
+    result = {
+        "model": _Model(),
+        "growth_reports": {},
+        "training_stats": {
+            "neurogenesis_parameter_updates": 0,
+            "incremental_parameter_updates": 123,
+        },
+        "eval_records": [],
+    }
+
+    summary = summarize_result(result)
+
+    assert summary["model_update_steps"] == 123
+    assert summary["incremental_parameter_updates"] == 123
 
 
 def test_comparison_annotation_applies_cap_invariance_and_organicity_gates():

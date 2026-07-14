@@ -1521,7 +1521,11 @@ class NeurogenesisTrainer:
 
     def _should_log_outlier_criterion_diagnostics(self, level: int) -> bool:
         cfg = self.outlier_criterion_diagnostics
-        if not cfg.get("enabled", False) or not self.logger:
+        return self._outlier_criterion_diagnostics_enabled(level) and bool(self.logger)
+
+    def _outlier_criterion_diagnostics_enabled(self, level: int) -> bool:
+        cfg = self.outlier_criterion_diagnostics
+        if not cfg.get("enabled", False):
             return False
         levels = cfg.get("levels", set())
         return not levels or int(level) in levels
@@ -1535,9 +1539,9 @@ class NeurogenesisTrainer:
         iteration: int,
         pixel_errors: Tensor,
         pixel_mask: Tensor,
-    ) -> None:
-        if not self._should_log_outlier_criterion_diagnostics(level):
-            return
+    ) -> dict[str, float]:
+        if not self._outlier_criterion_diagnostics_enabled(level):
+            return {}
         local_errors: list[Tensor] = []
         device = self._model_device()
         with torch.no_grad():
@@ -1549,12 +1553,12 @@ class NeurogenesisTrainer:
                 err = self.ae.reconstruction_error(local_recon, local_target)
                 local_errors.append(err.detach().cpu())
         if not local_errors:
-            return
+            return {}
         local = torch.cat(local_errors)
         pixel = pixel_errors.detach().cpu()
         pixel_mask = pixel_mask.detach().cpu().bool()
         if local.numel() != pixel.numel():
-            return
+            return {}
 
         n_pixel = int(pixel_mask.sum().item())
         local_topk_mask = torch.zeros_like(pixel_mask)
@@ -1568,6 +1572,28 @@ class NeurogenesisTrainer:
             f"diagnostics/outlier_criterion/class_{class_id}/"
             f"level_{level}/iteration_{iteration}"
         )
+        diagnostics = {
+            "pixel_mean": float(pixel.mean().item()),
+            "pixel_std": float(pixel.std(unbiased=False).item()),
+            "pixel_threshold": float(self.thresholds[level]),
+            "pixel_outlier_fraction": float(pixel_mask.float().mean().item()),
+            "local_mean": float(local.mean().item()),
+            "local_std": float(local.std(unbiased=False).item()),
+            "local_topk_fraction": float(local_topk_mask.float().mean().item()),
+            "overlap_fraction_of_pixel": float(overlap / max(n_pixel, 1)),
+            "jaccard": float(overlap / max(union, 1)),
+        }
+        for percentile in self.outlier_criterion_diagnostics.get("percentiles", []):
+            q = min(max(float(percentile), 0.0), 1.0)
+            suffix = f"p{int(q * 1000):03d}"
+            diagnostics[f"local_{suffix}"] = float(torch.quantile(local, q).item())
+            diagnostics[f"pixel_{suffix}"] = float(torch.quantile(pixel, q).item())
+        if local.numel() > 1 and float(local.std(unbiased=False).item()) > 0.0 and float(
+            pixel.std(unbiased=False).item()
+        ) > 0.0:
+            corr = torch.corrcoef(torch.stack([pixel, local]))[0, 1]
+            diagnostics["pixel_local_corr"] = float(corr.item())
+
         metrics = {
             f"{prefix}/pixel_mean": float(pixel.mean().item()),
             f"{prefix}/pixel_std": float(pixel.std(unbiased=False).item()),
@@ -1579,20 +1605,11 @@ class NeurogenesisTrainer:
             f"{prefix}/overlap_fraction_of_pixel": float(overlap / max(n_pixel, 1)),
             f"{prefix}/jaccard": float(overlap / max(union, 1)),
         }
-        for percentile in self.outlier_criterion_diagnostics.get("percentiles", []):
-            q = min(max(float(percentile), 0.0), 1.0)
-            metrics[f"{prefix}/local_p{int(q * 1000):03d}"] = float(
-                torch.quantile(local, q).item()
-            )
-            metrics[f"{prefix}/pixel_p{int(q * 1000):03d}"] = float(
-                torch.quantile(pixel, q).item()
-            )
-        if local.numel() > 1 and float(local.std(unbiased=False).item()) > 0.0 and float(
-            pixel.std(unbiased=False).item()
-        ) > 0.0:
-            corr = torch.corrcoef(torch.stack([pixel, local]))[0, 1]
-            metrics[f"{prefix}/pixel_local_corr"] = float(corr.item())
-        self.logger.log_metrics(metrics, step=self._class_count)
+        for key, value in diagnostics.items():
+            metrics[f"{prefix}/{key}"] = value
+        if self._should_log_outlier_criterion_diagnostics(level):
+            self.logger.log_metrics(metrics, step=self._class_count)
+        return diagnostics
 
     def _get_outliers(
         self,
@@ -1603,18 +1620,50 @@ class NeurogenesisTrainer:
     ):
         device = self._model_device()
 
+        # Evaluate a stable, explicit index domain. Iterating a shuffled loader
+        # and then applying its boolean mask to a sampler's static index list can
+        # select different samples from the ones whose errors were measured.
+        # A deterministic view also keeps the pixel-space and local-SHL-AE
+        # diagnostics sample-aligned when they require separate forward passes.
+        sampler = getattr(loader, "sampler", None)
+        sampler_indices = getattr(sampler, "idxs", None)
+        if sampler_indices is None:
+            sampler_indices = getattr(sampler, "indices", None)
+        if sampler_indices is None:
+            candidate_indices = list(range(len(loader.dataset)))
+        else:
+            candidate_indices = [int(index) for index in sampler_indices]
+        evaluation_subset = Subset(loader.dataset, candidate_indices)
+        evaluation_loader = DataLoader(
+            evaluation_subset,
+            batch_size=loader.batch_size,
+            shuffle=False,
+            num_workers=loader.num_workers,
+            pin_memory=loader.pin_memory,
+        )
+
         # 1) Collect all per-sample errors into a single flat Tensor
         errors = []
-        for batch in loader:
+        activations = []
+        collect_diagnostics = self._outlier_criterion_diagnostics_enabled(level)
+        for batch in evaluation_loader:
             x, _ = batch
             x = x.to(device, non_blocking=True)
-            err = self.ae.reconstruction_error(
-                self.ae.forward_partial(x, level), x
-            )  # shape: [batch_size]
+            latent = None
+            if collect_diagnostics:
+                try:
+                    recon, latent = self.ae.forward_partial(x, level, ret_lat=True)
+                except TypeError:
+                    recon = self.ae.forward_partial(x, level)
+            else:
+                recon = self.ae.forward_partial(x, level)
+            err = self.ae.reconstruction_error(recon, x)  # shape: [batch_size]
             errors.append(err.detach().cpu())
+            if latent is not None:
+                activations.append(latent.detach().float().cpu().reshape(-1))
         errors = torch.cat(errors)  # [N]
         stats_key = (str("unknown" if class_id is None else class_id), int(level), int(iteration))
-        self._latest_outlier_stats[stats_key] = {
+        stats = {
             "pixel_mean": float(errors.mean().item()) if errors.numel() else float("nan"),
             "pixel_std": float(errors.std(unbiased=False).item()) if errors.numel() else float("nan"),
             "pixel_max": float(errors.max().item()) if errors.numel() else float("nan"),
@@ -1628,6 +1677,38 @@ class NeurogenesisTrainer:
         )
         thr = float(threshold_info["threshold"])
         mask = errors > thr
+        stats.update(
+            {
+                "effective_threshold": thr,
+                "base_threshold": float(threshold_info["base_threshold"]),
+                "threshold_over_mean": thr / max(float(stats["pixel_mean"]), 1.0e-12),
+            }
+        )
+        for percentile in (0.5, 0.9, 0.95, 0.985, 0.995):
+            if errors.numel():
+                stats[f"pixel_p{int(percentile * 1000):03d}"] = float(
+                    torch.quantile(errors, percentile).item()
+                )
+        if activations:
+            activation = torch.cat(activations)
+            stats.update(
+                {
+                    "activation_mean": float(activation.mean().item()),
+                    "activation_std": float(activation.std(unbiased=False).item()),
+                    "activation_min": float(activation.min().item()),
+                    "activation_max": float(activation.max().item()),
+                    "activation_near_zero_fraction": float(
+                        (activation.abs() <= 1.0e-6).float().mean().item()
+                    ),
+                    "activation_nonpositive_fraction": float(
+                        (activation <= 0.0).float().mean().item()
+                    ),
+                    "activation_near_one_fraction": float(
+                        (activation >= 0.99).float().mean().item()
+                    ),
+                }
+            )
+        self._latest_outlier_stats[stats_key] = stats
         self._log_adaptive_outlier_threshold(
             class_id="unknown" if class_id is None else class_id,
             level=level,
@@ -1635,38 +1716,26 @@ class NeurogenesisTrainer:
             total_seen=int(errors.numel()),
             threshold_info=threshold_info,
         )
-        self._log_outlier_criterion_diagnostics(
-            loader=loader,
+        criterion_diagnostics = self._log_outlier_criterion_diagnostics(
+            loader=evaluation_loader,
             level=level,
             class_id="unknown" if class_id is None else class_id,
             iteration=iteration,
             pixel_errors=errors,
             pixel_mask=mask,
         )
+        stats.update(criterion_diagnostics)
         # print(f"[DEBUG] threshold = {thr:.4f}, errors>thr mask[:10] = {mask[:10].tolist()}")
         n_outliers = int(mask.sum().item())
         # print(f"[DEBUG] n_outliers = {n_outliers} / {len(errors)}")
 
-        # 3) Find the *real* dataset indices you iterated over
-        if hasattr(loader, "sampler") and hasattr(loader.sampler, "idxs"):
-            all_indices = loader.sampler.idxs
-        else:
-            # if loader.dataset is a Subset, its .indices attr points into the full dataset
-            all_indices = getattr(loader.dataset, "indices", list(range(len(loader.dataset))))
-        # print(f"[DEBUG] first 10 all_indices = {all_indices[:10]}")
-
-        # 4) Map mask→real indices
-        outlier_real_idxs = [all_indices[i] for i, m in enumerate(mask) if m]
-        # print(f"[DEBUG] first 10 outlier_real_idxs = {outlier_real_idxs[:10]}")
-
-        # 5) Build subset & return loader
-        # If the original loader.dataset is already a Subset, its `.indices`
-        # refer to the underlying base dataset. We must create the new Subset
-        # from that base dataset, not from the Subset itself, otherwise the
-        # indices would be interpreted relative to the Subset and can go
-        # out-of-range. For non-Subset datasets, use the dataset directly.
-        base_ds = loader.dataset.dataset if isinstance(loader.dataset, Subset) else loader.dataset
-        subset = Subset(base_ds, outlier_real_idxs)
+        # 3) Map the aligned mask back into the input loader's dataset domain.
+        outlier_indices = [
+            candidate_indices[i]
+            for i, is_outlier in enumerate(mask)
+            if is_outlier
+        ]
+        subset = Subset(loader.dataset, outlier_indices)
         outlier_loader = DataLoader(
             subset,
             batch_size=loader.batch_size,
@@ -1821,6 +1890,11 @@ class NeurogenesisTrainer:
                         self._latest_outlier_stats.get(
                             (str(class_id), int(level), int(iteration_idx)), {}
                         ).get("pixel_mean", float("nan"))
+                    ),
+                    "diagnostics": dict(
+                        self._latest_outlier_stats.get(
+                            (str(class_id), int(level), int(iteration_idx)), {}
+                        )
                     ),
                 }
             )
@@ -2093,6 +2167,11 @@ class NeurogenesisTrainer:
                                 (str(class_id), int(level), int(iteration_idx)), {}
                             ).get("pixel_mean", float("nan"))
                         ),
+                        "diagnostics": dict(
+                            self._latest_outlier_stats.get(
+                                (str(class_id), int(level), int(iteration_idx)), {}
+                            )
+                        ),
                     }
                 )
                 if self.logger:
@@ -2137,9 +2216,13 @@ class NeurogenesisTrainer:
                     "initial_outliers": int(outlier_history[level][0]["n_outliers"]),
                     "initial_outlier_fraction": float(outlier_history[level][0]["fraction"]),
                     "initial_mean_mse": float(outlier_history[level][0]["mean_mse"]),
+                    "initial_diagnostics": dict(
+                        outlier_history[level][0].get("diagnostics", {})
+                    ),
                     "final_outliers": int(final_entry["n_outliers"]),
                     "final_outlier_fraction": float(final_entry["fraction"]),
                     "final_mean_mse": float(final_entry["mean_mse"]),
+                    "final_diagnostics": dict(final_entry.get("diagnostics", {})),
                     "allowed_outliers": int(final_allowed),
                     "stop_reason": str(stop_reason),
                     "unresolved_outliers": unresolved_outliers,

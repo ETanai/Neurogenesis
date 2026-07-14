@@ -17,7 +17,7 @@ import numpy as np
 import torch
 import tqdm
 from omegaconf import DictConfig, OmegaConf
-from torch.utils.data import ConcatDataset, DataLoader, Subset
+from torch.utils.data import ConcatDataset, DataLoader, Subset, TensorDataset
 from tqdm import tqdm
 
 from data.mnist_datamodule import MNISTDataModule
@@ -1491,6 +1491,76 @@ def _collect_thresholds(
     return vals
 
 
+def _refresh_thresholds_for_learned_classes(
+    model: NGAutoEncoder,
+    dm,
+    cfg: DictConfig,
+    learned: Sequence[int],
+    logger,
+    replay=None,
+    *,
+    before_class: int,
+) -> list[float]:
+    """Re-estimate thresholds without observing the incoming class.
+
+    The paper says thresholds are determined from statistics of previously seen
+    classes but does not state whether they remain fixed after base training.
+    This opt-in diagnostic resolves that ambiguity using only ``learned``
+    original-data classes. It never uses validation/test data or the incoming
+    class during calibration.
+    """
+    if not learned:
+        raise ValueError("Threshold refresh requires at least one learned class")
+    source = str(cfg.experiment.threshold.get("refresh_source", "dataset")).lower()
+    if source == "dataset":
+        threshold_subset = _get_combined_dataset(dm, learned, split="train")
+        threshold_loader = _dataloader(
+            threshold_subset,
+            batch_size=cfg.data.batch_size,
+            num_workers=cfg.data.num_workers,
+            shuffle=False,
+        )
+    elif source == "replay":
+        if replay is None:
+            raise ValueError("Replay-sourced threshold refresh requires replay to be enabled")
+        available = set(int(cls) for cls in replay.available_classes())
+        missing = [int(cls) for cls in learned if int(cls) not in available]
+        if missing:
+            raise RuntimeError(
+                "Replay-sourced threshold refresh is missing learned classes: "
+                f"{missing}"
+            )
+        n_per_class = int(
+            cfg.experiment.threshold.get("refresh_samples_per_class", 1024)
+        )
+        if n_per_class <= 0:
+            raise ValueError("threshold.refresh_samples_per_class must be positive")
+        samples: list[torch.Tensor] = []
+        labels: list[torch.Tensor] = []
+        for cls in learned:
+            generated = replay.sample_images(int(cls), n_per_class).detach().cpu()
+            samples.append(generated)
+            labels.append(torch.full((n_per_class,), int(cls), dtype=torch.long))
+        threshold_subset = TensorDataset(torch.cat(samples), torch.cat(labels))
+        threshold_loader = _dataloader(
+            threshold_subset,
+            batch_size=cfg.data.batch_size,
+            num_workers=0,
+            shuffle=False,
+        )
+    else:
+        raise ValueError(
+            f"Unknown threshold.refresh_source {source!r}; expected dataset or replay"
+        )
+    values = _collect_thresholds(model, threshold_loader, cfg, logger=logger)
+    for level, value in enumerate(values):
+        logger.log_metrics(
+            {f"threshold_refresh/before_class_{before_class}/level_{level}": float(value)},
+            step=len(learned),
+        )
+    return [float(value) for value in values]
+
+
 def _outlier_stats_for_loader(
     model: NGAutoEncoder,
     loader: DataLoader,
@@ -2359,11 +2429,13 @@ def run(cfg: DictConfig) -> None:
     replay_mode = str(cfg.replay.get("mode", "intrinsic")).lower()
     use_neurogenesis, regime_replay = _resolve_regime(cfg)
     replay_enabled = bool(cfg.replay.get("enabled", True))
-    use_replay = (regime_replay and replay_enabled) or (
-        replay_mode == "dataset" and replay_enabled
-    )
+    # The experiment regime is authoritative.  In particular, selecting the
+    # dataset replay backend must not silently turn the documented no-replay
+    # ``ndl`` and ``cl`` controls into replay experiments.
+    use_replay = regime_replay and replay_enabled
 
     thresholds: List[float] = []
+    threshold_history: list[dict[str, Any]] = []
     if use_neurogenesis:
         manual_thresholds = None
         try:
@@ -2401,6 +2473,13 @@ def run(cfg: DictConfig) -> None:
             logger.log_metrics({f"threshold/effective_level_{i}": float(thr * thresh_factor)}, step=0)
         _log_threshold_audit(model, dm, cfg, thresholds, device, logger)
         _log_growth_wiring_probe(model, dm, cfg, device, logger)
+        threshold_history.append(
+            {
+                "stage": "initial",
+                "calibration_classes": [int(cls) for cls in cfg.experiment.base_classes],
+                "thresholds": [float(value) for value in thresholds],
+            }
+        )
 
     replay = None
     if use_replay:
@@ -2643,6 +2722,30 @@ def run(cfg: DictConfig) -> None:
     train_limit_per_class = cfg.experiment.get("incremental_train_limit_per_class", None)
     for stage, class_id in enumerate(incremental_classes, start=1):
         t_learn0 = time.perf_counter()
+        if use_neurogenesis and bool(
+            cfg.experiment.threshold.get("refresh_before_class", False)
+        ):
+            thresholds = _refresh_thresholds_for_learned_classes(
+                model,
+                dm,
+                cfg,
+                learned,
+                logger,
+                replay=replay,
+                before_class=int(class_id),
+            )
+            trainer.thresholds = list(thresholds)
+            threshold_history.append(
+                {
+                    "stage": "before_class",
+                    "class_id": int(class_id),
+                    "calibration_classes": [int(cls) for cls in learned],
+                    "source": str(
+                        cfg.experiment.threshold.get("refresh_source", "dataset")
+                    ).lower(),
+                    "thresholds": [float(value) for value in thresholds],
+                }
+            )
         loader = _train_loader_for_classes(
             dm,
             [class_id],
@@ -2799,6 +2902,7 @@ def run(cfg: DictConfig) -> None:
         "replay": replay,
         "training_stats": training_stats,
         "growth_reports": getattr(trainer, "class_reports", {}),
+        "threshold_history": threshold_history,
         "eval_records": eval_records,
     }
 

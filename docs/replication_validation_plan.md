@@ -375,28 +375,27 @@ not silently omit failed seeds.
 6. All stages succeed -> publish confirmatory artifacts and state which claims
    are reproduced, contradicted, or unresolved.
 
-## Current decision-tree position (2026-07-12)
+## Final decision-tree position (2026-07-14)
 
-The completed screening campaign is at branch 4: original-data replay succeeds
-through the full MNIST curriculum, while the literal full-covariance Gaussian
-IR candidate fails its matched no-replay comparison. On seeds 42--44, clean
-replay improves macro validation MSE over no replay in `3/3` cases; Gaussian
-IR at replay ratio `0.5` degrades it in `3/3` cases. Exact values and the frozen
-configuration are recorded in
-`docs/paper_compatible_optimization_plan.md`.
+Stages through ten-seed MNIST confirmation are complete. The clean original-data
+oracle, literal full-covariance intrinsic replay, no replay, and all three
+capacity-matched classical controls each completed seeds 42--51. The confirmed
+NDL+IR MSE is `0.06395` versus `0.02367` for CL+IR, and intrinsic NDL exhausts
+all 32 growth loops in every seed. This reverses the paper's qualitative MNIST
+ordering and fails branch 4.
 
-This evidence rejects promotion of the tested IR candidate. It does not satisfy
-the five-seed IR gate, capacity-matched CL comparison, ten-seed confirmation,
-or SD-19 stages, and therefore is not a numerical replication claim.
+The conditional SD-19 stage is therefore not activated: the plan requires a
+successful MNIST confirmation before incurring the 20-order SD-19 campaign.
+This is a completed negative replication result, not an incomplete run. Exact
+intervals and manifests are recorded in
+`docs/organic_growth_ablation_results_2026-07-13.md` and
+`outputs/ablations/organic_growth/confirmation_10seed_aggregate/`.
 
-## Recommended execution order
+## Completed execution order
 
-1. Run the current unit/integration suite.
-2. Execute Tier A smoke runs for all replay conditions.
-3. Run Stage 1 base screening.
-4. Run Stage 2 single-digit clean-replay ablations.
-5. Freeze the clean-replay candidate and run Stage 3.
-6. Only after Stage 3 passes, run the Stage 4 IR bridge.
-7. Freeze the IR candidate and run Stage 5 confirmatory MNIST.
-8. Estimate SD-19 cost with the four-letter smoke curriculum.
-9. Run Stage 6 and the 20-order growth experiment.
+Stages 1--5, including mechanism diagnostics, replay-source isolation,
+capacity-matched controls, and 10 paired MNIST seeds, are complete. Stage 6 and
+the 20-order SD-19 experiment are conditionally skipped because Stage 5 fails
+the paper's comparative direction. Future work should focus on explicitly
+non-paper replay-distribution or global-objective changes, not describe further
+tuning as a literal replication.
