@@ -18,6 +18,11 @@ predictive_coding:
   usage_exponent: 0.5      # inverse-usage strength
   plasticity_min: 0.25     # lower bound after mean-one normalization
   plasticity_max: 4.0      # upper bound after mean-one normalization
+  layer_precisions: null   # one positive weight per encoder/decoder affine layer
+  global_loss_weight: 0.0  # optional weak end-to-end reconstruction term
+  update_mode: local       # local or backprop_equivalent pipeline control
+  consolidation_epochs: 0 # optional BP reconstruction epochs after local acquisition
+  consolidation_lr_ratio: 1.0 # consolidation LR relative to PC weight LR
 log_pretrain_thresholds: true  # log per-epoch threshold estimates during pretraining
 base_checkpoint: null      # optional pretrained NGAutoEncoder checkpoint to load
 base_checkpoint_out: null  # optional path where a newly pretrained base model is saved

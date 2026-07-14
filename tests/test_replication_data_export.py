@@ -18,6 +18,7 @@ def test_export_contains_all_figure_mappings(tmp_path, monkeypatch):
         "sd19_feasibility_comparison.png",
         "training_resource_comparison.png",
         "predictive_coding_comparison.png",
+        "post_replication_optimization.png",
     }
     for names in manifest["figures"].values():
         assert all((tmp_path / name).is_file() for name in names)

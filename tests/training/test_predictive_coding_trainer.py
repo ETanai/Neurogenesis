@@ -1,4 +1,7 @@
+import copy
+
 import torch
+import torch.nn.functional as F
 
 from models.ng_autoencoder import NGAutoEncoder
 from training.predictive_coding_trainer import PredictiveCodingTrainer
@@ -74,3 +77,47 @@ def test_predictive_coding_configuration_is_validated():
         assert "inference_steps" in str(error)
     else:
         raise AssertionError("Expected inference_steps validation")
+
+
+def test_layer_precisions_weight_local_energy():
+    trainer = _trainer(inference_steps=1)
+    batch = torch.rand(3, 8)
+    with torch.no_grad():
+        states = trainer.feedforward_states(batch)
+    states[-1] = batch
+    uniform = trainer.prediction_energy(states).item()
+    trainer.layer_precisions[-1] = 4.0
+    weighted = trainer.prediction_energy(states).item()
+    assert weighted > uniform
+
+
+def test_backprop_equivalent_mode_matches_direct_reconstruction_update():
+    trainer = _trainer(inference_steps=1)
+    reference = copy.deepcopy(trainer.ae)
+    trainer.update_mode = "backprop_equivalent"
+    batch = torch.rand(4, 8)
+
+    pc_optimizer = torch.optim.Adam(trainer.ae.parameters(), lr=trainer.base_lr)
+    ref_optimizer = torch.optim.Adam(reference.parameters(), lr=trainer.base_lr)
+    trainer.train_batch(batch, pc_optimizer)
+    ref_loss = F.mse_loss(reference(batch)["recon"], batch)
+    ref_optimizer.zero_grad(set_to_none=True)
+    ref_loss.backward()
+    ref_optimizer.step()
+
+    for actual, expected in zip(trainer.ae.parameters(), reference.parameters()):
+        assert torch.equal(actual, expected)
+
+
+def test_hybrid_consolidation_adds_backprop_update_steps():
+    trainer = _trainer(inference_steps=1)
+    trainer.consolidation_epochs = 1
+    trainer.consolidation_lr_ratio = 2.0
+    images = torch.rand(4, 8)
+    loader = torch.utils.data.DataLoader(
+        torch.utils.data.TensorDataset(images, torch.zeros(4, dtype=torch.long)),
+        batch_size=2,
+    )
+    trainer.learn_class(0, loader)
+    assert trainer.update_steps == 4
+    assert len(trainer.diagnostics["class_summaries"]["0"]["consolidation_loss"]) == 1

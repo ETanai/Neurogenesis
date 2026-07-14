@@ -564,6 +564,21 @@ separately in
 Its diagram and complete portable source data are included with the other
 report artifacts.
 
+### Gated optimization follow-up
+
+A subsequent post-replication optimization study added global reconstruction
+consolidation to NDL and screened precision, inference-depth, and hybrid
+consolidation changes for predictive coding. No predictive-coding candidate
+passed the joint acquisition/forgetting gate. Five low-rate all-weight
+consolidation epochs did pass for NDL and reduced its three-seed full-curriculum
+macro MSE from `0.04816` to `0.02289`. An exact endpoint-matched conventional
+learner still achieved `0.01282` with far fewer updates.
+
+See
+[`post_replication_optimization_results_2026-07-14.md`](post_replication_optimization_results_2026-07-14.md)
+for the gated protocol, excluded activation-mismatch audit, diagram, exact
+controls, and portable data.
+
 ## Final conclusion
 
 **NDL + intrinsic replay is the closest implementation of the published

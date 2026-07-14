@@ -2669,6 +2669,15 @@ def run(cfg: DictConfig) -> None:
                 "usage_exponent": pc_cfg.get("usage_exponent", 0.5),
                 "plasticity_min": pc_cfg.get("plasticity_min", 0.25),
                 "plasticity_max": pc_cfg.get("plasticity_max", 4.0),
+                "layer_precisions": (
+                    list(pc_cfg.get("layer_precisions"))
+                    if pc_cfg.get("layer_precisions", None) is not None
+                    else None
+                ),
+                "global_loss_weight": pc_cfg.get("global_loss_weight", 0.0),
+                "update_mode": pc_cfg.get("update_mode", "local"),
+                "consolidation_epochs": pc_cfg.get("consolidation_epochs", 0),
+                "consolidation_lr_ratio": pc_cfg.get("consolidation_lr_ratio", 1.0),
             }
         elif optimizer_name != "backprop":
             raise ValueError(

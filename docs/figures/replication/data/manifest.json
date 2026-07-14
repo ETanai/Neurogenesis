@@ -20,6 +20,11 @@
       "mnist_condition_metrics.csv",
       "mnist_seed_metrics.csv"
     ],
+    "post_replication_optimization.png": [
+      "post_replication_optimization_screen.csv",
+      "post_replication_optimization_full_seed.csv",
+      "post_replication_optimization_per_class.csv"
+    ],
     "predictive_coding_comparison.png": [
       "predictive_coding_aggregate.csv",
       "predictive_coding_seed_metrics.csv"

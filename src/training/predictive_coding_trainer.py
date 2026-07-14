@@ -35,6 +35,11 @@ class PredictiveCodingTrainer(IncrementalTrainer):
         usage_exponent: float = 0.5,
         plasticity_min: float = 0.25,
         plasticity_max: float = 4.0,
+        layer_precisions: list[float] | None = None,
+        global_loss_weight: float = 0.0,
+        update_mode: str = "local",
+        consolidation_epochs: int = 0,
+        consolidation_lr_ratio: float = 1.0,
         **kwargs,
     ) -> None:
         super().__init__(ae=ae, **kwargs)
@@ -49,6 +54,13 @@ class PredictiveCodingTrainer(IncrementalTrainer):
             raise ValueError("usage_decay must be in [0, 1)")
         if not 0 < plasticity_min <= plasticity_max:
             raise ValueError("plasticity bounds must satisfy 0 < min <= max")
+        update_mode = str(update_mode).lower()
+        if update_mode not in {"local", "backprop_equivalent"}:
+            raise ValueError("update_mode must be 'local' or 'backprop_equivalent'")
+        if global_loss_weight < 0:
+            raise ValueError("global_loss_weight must be non-negative")
+        if consolidation_epochs < 0 or consolidation_lr_ratio <= 0:
+            raise ValueError("consolidation settings require epochs >= 0 and lr_ratio > 0")
 
         self.inference_steps = int(inference_steps)
         self.inference_lr = float(inference_lr)
@@ -57,11 +69,30 @@ class PredictiveCodingTrainer(IncrementalTrainer):
         self.usage_exponent = float(usage_exponent)
         self.plasticity_min = float(plasticity_min)
         self.plasticity_max = float(plasticity_max)
+        pair_count = len(self._predictor_pairs())
+        self.layer_precisions = (
+            [1.0] * pair_count
+            if layer_precisions is None
+            else [float(value) for value in layer_precisions]
+        )
+        if len(self.layer_precisions) != pair_count or any(value <= 0 for value in self.layer_precisions):
+            raise ValueError(
+                f"layer_precisions must contain {pair_count} positive values"
+            )
+        self.global_loss_weight = float(global_loss_weight)
+        self.update_mode = update_mode
+        self.consolidation_epochs = int(consolidation_epochs)
+        self.consolidation_lr_ratio = float(consolidation_lr_ratio)
         self._usage: list[Tensor | None] = [None] * len(self._predictor_pairs())
         self.diagnostics: dict[str, object] = {
             "inference_steps": self.inference_steps,
             "inference_lr": self.inference_lr,
             "plasticity_mode": self.plasticity_mode,
+            "layer_precisions": self.layer_precisions,
+            "global_loss_weight": self.global_loss_weight,
+            "update_mode": self.update_mode,
+            "consolidation_epochs": self.consolidation_epochs,
+            "consolidation_lr_ratio": self.consolidation_lr_ratio,
             "energy_before": [],
             "energy_after": [],
             "local_loss": [],
@@ -98,8 +129,10 @@ class PredictiveCodingTrainer(IncrementalTrainer):
         retain learning-rate comparability with the MSE backprop baseline.
         """
         errors = [
-            (states[index + 1] - self._predict(pair, states[index])).square()
-            for index, pair in enumerate(self._predictor_pairs())
+            precision * (states[index + 1] - self._predict(pair, states[index])).square()
+            for index, (pair, precision) in enumerate(
+                zip(self._predictor_pairs(), self.layer_precisions)
+            )
         ]
         if reduction == "sum":
             return 0.5 * sum(error.sum() for error in errors)
@@ -195,13 +228,26 @@ class PredictiveCodingTrainer(IncrementalTrainer):
         with torch.no_grad():
             feedforward = self.feedforward_states(batch)
         self._update_usage(feedforward)
+        if self.update_mode == "backprop_equivalent":
+            target = batch.view(batch.size(0), -1)
+            recon = self.ae(batch)["recon"]
+            loss = F.mse_loss(recon, target)
+            optimizer.zero_grad(set_to_none=True)
+            loss.backward()
+            optimizer.step()
+            self.update_steps += 1
+            value = float(loss.detach().item())
+            return {"loss": value, "energy_before": value, "energy_after": value}
         states, before, after = self.infer_states(batch)
 
         local_losses = [
-            F.mse_loss(self._predict(pair, states[index]), states[index + 1])
-            for index, pair in enumerate(pairs)
+            precision * F.mse_loss(self._predict(pair, states[index]), states[index + 1])
+            for index, (pair, precision) in enumerate(zip(pairs, self.layer_precisions))
         ]
         loss = sum(local_losses)
+        if self.global_loss_weight > 0:
+            target = batch.view(batch.size(0), -1)
+            loss = loss + self.global_loss_weight * F.mse_loss(self.ae(batch)["recon"], target)
         snapshots = self._snapshots(pairs) if self.plasticity_mode == "usage" else []
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
@@ -254,6 +300,29 @@ class PredictiveCodingTrainer(IncrementalTrainer):
                     step=self._class_count * self.epochs + epoch,
                 )
 
+        consolidation_losses: list[float] = []
+        if self.consolidation_epochs > 0 and self.update_mode == "local":
+            consolidation_optimizer = torch.optim.Adam(
+                self.ae.parameters(),
+                lr=self.base_lr * self.consolidation_lr_ratio,
+                weight_decay=self.weight_decay,
+            )
+            for _ in range(self.consolidation_epochs):
+                epoch_losses = []
+                for images, _ in loader:
+                    images = images.to(self.device, non_blocking=True)
+                    mixed = self._augment_with_replay(images)
+                    target = mixed.view(mixed.size(0), -1)
+                    loss = F.mse_loss(self.ae(mixed)["recon"], target)
+                    consolidation_optimizer.zero_grad(set_to_none=True)
+                    loss.backward()
+                    consolidation_optimizer.step()
+                    self.update_steps += 1
+                    epoch_losses.append(float(loss.detach().item()))
+                consolidation_losses.append(
+                    sum(epoch_losses) / len(epoch_losses) if epoch_losses else 0.0
+                )
+
         self.history[class_id] = history
         self.diagnostics["energy_before"].extend(history["energy_before"])
         self.diagnostics["energy_after"].extend(history["energy_after"])
@@ -265,6 +334,7 @@ class PredictiveCodingTrainer(IncrementalTrainer):
             "mean_local_loss": sum(history["train_loss"]) / len(history["train_loss"]),
             "plasticity_factor_min": min(float(value.min().item()) for value in factors),
             "plasticity_factor_max": max(float(value.max().item()) for value in factors),
+            "consolidation_loss": consolidation_losses,
         }
         if self.ir is not None:
             self.ir.fit(loader)

@@ -27,6 +27,9 @@ RESOURCE_SUMMARY = (
 PREDICTIVE_CODING_ROOT = (
     ROOT / "outputs" / "predictive_coding" / "fixed_endpoint_comparison_lr1e4"
 )
+OPTIMIZATION_NDL = ROOT / "outputs" / "optimization" / "post_replication_gated" / "summary.json"
+OPTIMIZATION_PC = ROOT / "outputs" / "optimization" / "post_replication_pc_corrected" / "summary.json"
+OPTIMIZATION_CL = ROOT / "outputs" / "optimization" / "optimized_ndl_matched_controls" / "summary.json"
 
 ORDER = [
     "cl_dataset_oracle",
@@ -428,6 +431,21 @@ def main() -> None:
         ["condition", "seed_count", "metric", "mean", "std", "ci95_low", "ci95_high"],
     )
 
+    # The optimization plotter writes three carefully normalized tables because
+    # it combines a corrected PC screen, an NDL screen/full run, and separately
+    # trained exact endpoint controls. Preserve those tables in alternate export
+    # locations (including test/temp directories) without recomputing that join.
+    canonical_data = ROOT / "docs" / "figures" / "replication" / "data"
+    for name in (
+        "post_replication_optimization_screen.csv",
+        "post_replication_optimization_full_seed.csv",
+        "post_replication_optimization_per_class.csv",
+    ):
+        source = canonical_data / name
+        destination = OUTPUT / name
+        if source.resolve() != destination.resolve():
+            destination.write_bytes(source.read_bytes())
+
     bundle = {
         "schema_version": 1,
         "description": "Portable base observations and summaries for all replication-report figures.",
@@ -437,6 +455,11 @@ def main() -> None:
         "predictive_coding_extension": {
             "aggregate": pc_aggregate,
             "seed_observations": pc_rows,
+        },
+        "post_replication_optimization": {
+            "ndl_screen_and_full": _load(OPTIMIZATION_NDL),
+            "predictive_coding_corrected_screen": _load(OPTIMIZATION_PC),
+            "optimized_ndl_matched_controls": _load(OPTIMIZATION_CL),
         },
     }
     (OUTPUT / "replication_figure_base_data.json").write_text(
@@ -459,6 +482,11 @@ def main() -> None:
         ],
         "predictive_coding_comparison.png": [
             "predictive_coding_aggregate.csv", "predictive_coding_seed_metrics.csv"
+        ],
+        "post_replication_optimization.png": [
+            "post_replication_optimization_screen.csv",
+            "post_replication_optimization_full_seed.csv",
+            "post_replication_optimization_per_class.csv",
         ],
     }
     manifest = {

@@ -149,6 +149,8 @@ recreate it in R, Julia, MATLAB, a spreadsheet, or another plotting program.
 The post-replication fixed-capacity predictive-coding comparison is documented
 in `docs/predictive_coding_extension_results_2026-07-14.md` and can be resumed
 with `python scripts/run_predictive_coding_comparison.py --quiet --resume`.
+The subsequent gated optimization study for both NDL and predictive coding is
+reported in `docs/post_replication_optimization_results_2026-07-14.md`.
 
 ## Paper source
 
