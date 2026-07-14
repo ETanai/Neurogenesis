@@ -9,6 +9,15 @@ weight_decay: 0.0          # set >0 to regularize large weights
 device: auto               # torch.device string; auto|cpu|cuda|cuda:0|mps are typical choices.
 validate: true             # run validation after each epoch
 incremental_epochs: 5      # epochs spent learning each incremental class batch
+incremental_optimizer: backprop # backprop or predictive_coding (research extension)
+predictive_coding:
+  inference_steps: 5       # hidden-state relaxation iterations per batch
+  inference_lr: 0.1        # activity-state step size; separate from the weight LR
+  plasticity_mode: uniform # uniform or usage-dependent post-synaptic step scaling
+  usage_decay: 0.99        # EMA decay for absolute neuron activity
+  usage_exponent: 0.5      # inverse-usage strength
+  plasticity_min: 0.25     # lower bound after mean-one normalization
+  plasticity_max: 4.0      # upper bound after mean-one normalization
 log_pretrain_thresholds: true  # log per-epoch threshold estimates during pretraining
 base_checkpoint: null      # optional pretrained NGAutoEncoder checkpoint to load
 base_checkpoint_out: null  # optional path where a newly pretrained base model is saved

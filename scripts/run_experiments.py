@@ -24,6 +24,7 @@ from data.mnist_datamodule import MNISTDataModule
 from models.ng_autoencoder import NGAutoEncoder
 from training.base_pretrainer import AutoencoderPretrainer, PretrainingConfig
 from training.incremental_trainer import IncrementalTrainer
+from training.predictive_coding_trainer import PredictiveCodingTrainer
 from training.neurogenesis_trainer import NeurogenesisTrainer
 from utils.dataset_replay import DatasetReplay
 from utils.intrinsic_replay import IntrinsicReplay
@@ -2654,7 +2655,27 @@ def run(cfg: DictConfig) -> None:
             ),
         )
     else:
-        trainer = IncrementalTrainer(
+        optimizer_name = str(cfg.training.get("incremental_optimizer", "backprop")).lower()
+        trainer_class = IncrementalTrainer
+        trainer_kwargs = {}
+        if optimizer_name == "predictive_coding":
+            trainer_class = PredictiveCodingTrainer
+            pc_cfg = cfg.training.get("predictive_coding", {})
+            trainer_kwargs = {
+                "inference_steps": pc_cfg.get("inference_steps", 5),
+                "inference_lr": pc_cfg.get("inference_lr", 0.1),
+                "plasticity_mode": pc_cfg.get("plasticity_mode", "uniform"),
+                "usage_decay": pc_cfg.get("usage_decay", 0.99),
+                "usage_exponent": pc_cfg.get("usage_exponent", 0.5),
+                "plasticity_min": pc_cfg.get("plasticity_min", 0.25),
+                "plasticity_max": pc_cfg.get("plasticity_max", 4.0),
+            }
+        elif optimizer_name != "backprop":
+            raise ValueError(
+                f"Unknown training.incremental_optimizer {optimizer_name!r}; "
+                "expected 'backprop' or 'predictive_coding'."
+            )
+        trainer = trainer_class(
             ae=model,
             ir=replay,
             base_lr=cfg.training.base_lr,
@@ -2665,7 +2686,13 @@ def run(cfg: DictConfig) -> None:
             replay_per_class_ratio=cfg.replay.get("per_class_batch_ratio", 1.0),
             device=device,
             logger=logger,
+            **trainer_kwargs,
         )
+        if isinstance(trainer, PredictiveCodingTrainer):
+            usage_loader = _train_loader_for_classes(
+                dm, cfg.experiment.base_classes, shuffle=False
+            )
+            trainer.initialize_usage(usage_loader)
 
     if resume_payload is not None and isinstance(trainer, NeurogenesisTrainer):
         trainer.class_reports.update(resume_payload.get("growth_reports", {}))
@@ -2904,6 +2931,7 @@ def run(cfg: DictConfig) -> None:
         "growth_reports": getattr(trainer, "class_reports", {}),
         "threshold_history": threshold_history,
         "eval_records": eval_records,
+        "optimizer_diagnostics": getattr(trainer, "diagnostics", {}),
     }
 
 

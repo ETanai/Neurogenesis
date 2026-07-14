@@ -24,6 +24,9 @@ SD19_SUMMARY = ROOT / "outputs" / "sd19" / "feasibility_screen" / "summary.json"
 RESOURCE_SUMMARY = (
     ROOT / "outputs" / "benchmarks" / "training_resources_seed42" / "summary.json"
 )
+PREDICTIVE_CODING_ROOT = (
+    ROOT / "outputs" / "predictive_coding" / "fixed_endpoint_comparison_lr1e4"
+)
 
 ORDER = [
     "cl_dataset_oracle",
@@ -376,12 +379,65 @@ def main() -> None:
         ["replay_regime", "metric", "ndl_value", "standard_value", "ndl_over_standard"],
     )
 
+    pc_rows = _load(PREDICTIVE_CODING_ROOT / "comparison_rows.json")
+    pc_seed_rows = []
+    for row in pc_rows:
+        diagnostics = row.get("optimizer_diagnostics") or {}
+        before = diagnostics.get("energy_before") or []
+        after = diagnostics.get("energy_after") or []
+        pc_seed_rows.append(
+            {
+                "condition": row["condition"],
+                "seed": row["seed"],
+                "optimizer": row.get("optimizer"),
+                "plasticity_mode": row.get("plasticity_mode"),
+                "replay_regime": row.get("replay_regime"),
+                "final_widths": _json_cell(row.get("final_widths")),
+                "macro_mse": row.get("macro_mse"),
+                "foreground_mse": row.get("foreground_mse"),
+                "mean_positive_forgetting": row.get("mean_positive_forgetting"),
+                "model_update_steps": row.get("model_update_steps"),
+                "runtime_seconds": row.get("runtime_seconds"),
+                "settled_over_initial_energy": (
+                    sum(after) / sum(before) if before and after else None
+                ),
+                "weight_displacement_l2": (row.get("weight_displacement") or {}).get("total_l2"),
+            }
+        )
+    pc_seed_fields = [
+        "condition", "seed", "optimizer", "plasticity_mode", "replay_regime",
+        "final_widths", "macro_mse", "foreground_mse", "mean_positive_forgetting",
+        "model_update_steps", "runtime_seconds", "settled_over_initial_energy",
+        "weight_displacement_l2",
+    ]
+    _write_csv("predictive_coding_seed_metrics.csv", pc_seed_rows, pc_seed_fields)
+    pc_aggregate = _load(PREDICTIVE_CODING_ROOT / "aggregate.json")
+    pc_aggregate_rows = [
+        {
+            "condition": row["condition"],
+            "seed_count": row["seed_count"],
+            "metric": metric,
+            **values,
+        }
+        for row in pc_aggregate
+        for metric, values in row["metrics"].items()
+    ]
+    _write_csv(
+        "predictive_coding_aggregate.csv",
+        pc_aggregate_rows,
+        ["condition", "seed_count", "metric", "mean", "std", "ci95_low", "ci95_high"],
+    )
+
     bundle = {
         "schema_version": 1,
         "description": "Portable base observations and summaries for all replication-report figures.",
         "mnist": {"aggregate": aggregate_rows, "seed_observations": raw},
         "sd19": {"seed_observations": sd19},
         "training_resources": {"seed_observations": resources},
+        "predictive_coding_extension": {
+            "aggregate": pc_aggregate,
+            "seed_observations": pc_rows,
+        },
     }
     (OUTPUT / "replication_figure_base_data.json").write_text(
         json.dumps(bundle, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -400,6 +456,9 @@ def main() -> None:
         ],
         "training_resource_comparison.png": [
             "training_resource_conditions.csv", "training_resource_ratios.csv"
+        ],
+        "predictive_coding_comparison.png": [
+            "predictive_coding_aggregate.csv", "predictive_coding_seed_metrics.csv"
         ],
     }
     manifest = {

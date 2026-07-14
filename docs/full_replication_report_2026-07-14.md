@@ -528,6 +528,8 @@ Supporting documents and code:
 - [`run_mnist_noreplay_matched_control.py`](../scripts/run_mnist_noreplay_matched_control.py)
 - [`benchmark_training_resources.py`](../scripts/benchmark_training_resources.py)
 - [`plot_training_resources.py`](../scripts/plot_training_resources.py)
+- [`run_predictive_coding_comparison.py`](../scripts/run_predictive_coding_comparison.py)
+- [`plot_predictive_coding_comparison.py`](../scripts/plot_predictive_coding_comparison.py)
 - [`export_replication_figure_data.py`](../scripts/export_replication_figure_data.py)
 - [`plot_sd19_comparison.py`](../scripts/plot_sd19_comparison.py)
 - [`summarize_confirmation.py`](../scripts/summarize_confirmation.py)
@@ -538,11 +540,29 @@ Regenerate the diagrams with:
 .venv/bin/python scripts/plot_replication_report.py
 .venv/bin/python scripts/plot_sd19_comparison.py
 .venv/bin/python scripts/plot_training_resources.py
+.venv/bin/python scripts/plot_predictive_coding_comparison.py
 .venv/bin/python scripts/export_replication_figure_data.py
 ```
 
 The plotting script verifies that each of the six conditions contains exactly
 seeds `42`--`51` before producing any figure.
+
+## Post-replication predictive-coding extension
+
+A fixed-endpoint research extension compared ordinary backpropagation with
+local predictive-coding updates and usage-dependent neuron plasticity. All
+methods started from identical seed-specific pretrained weights and followed
+the same iterative class curriculum. Across seeds `42`--`44`, predictive coding
+approximately matched backpropagation's no-replay forgetting (`0.00905` versus
+`0.00917`) but had **1.53x** its macro reconstruction MSE. With original-data
+replay it had **1.94x** the macro MSE. Usage-dependent plasticity did not improve
+either result.
+
+This extension does not alter the replication verdict and is documented
+separately in
+[`predictive_coding_extension_results_2026-07-14.md`](predictive_coding_extension_results_2026-07-14.md).
+Its diagram and complete portable source data are included with the other
+report artifacts.
 
 ## Final conclusion
 

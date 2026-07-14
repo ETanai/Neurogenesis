@@ -20,6 +20,10 @@
       "mnist_condition_metrics.csv",
       "mnist_seed_metrics.csv"
     ],
+    "predictive_coding_comparison.png": [
+      "predictive_coding_aggregate.csv",
+      "predictive_coding_seed_metrics.csv"
+    ],
     "sd19_feasibility_comparison.png": [
       "sd19_plotted_summary.csv",
       "sd19_seed_metrics.csv",

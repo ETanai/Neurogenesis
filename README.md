@@ -146,6 +146,10 @@ Portable source data for every report diagram are saved under
 a complete JSON bundle, and a manifest mapping each PNG to the files needed to
 recreate it in R, Julia, MATLAB, a spreadsheet, or another plotting program.
 
+The post-replication fixed-capacity predictive-coding comparison is documented
+in `docs/predictive_coding_extension_results_2026-07-14.md` and can be resumed
+with `python scripts/run_predictive_coding_comparison.py --quiet --resume`.
+
 ## Paper source
 
 The original arXiv v2 source bundle is preserved in
