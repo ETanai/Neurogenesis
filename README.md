@@ -159,6 +159,13 @@ The original arXiv v2 source bundle is preserved in
 `NeurogenesisDeepLearning.tex`, its generated bibliography (`.bbl`), all paper
 figures, and the original compressed source archive.
 
+## Replication protocol
+
+The LaTeX replication protocol and literature review of dynamically sized
+neural networks are under `docs/protocol/`. Its entry point is `main.tex`;
+the replication method, experimental protocol, results, and dynamic-capacity
+literature taxonomy are split into files under `docs/protocol/sections/`.
+
 ## Project status and scope
 
 This repository is an independent implementation maintained by ETanai. It is

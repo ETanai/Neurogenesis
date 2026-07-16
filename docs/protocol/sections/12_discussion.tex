@@ -1,0 +1,51 @@
+\section{Discussion and Conclusion}
+
+\subsection{What was reproduced}
+\begin{draftpoints}
+  \item \draftkey{Mechanism}demand detection; layer-local insertion; mature-feature protection; replay stabilization; deep propagation
+  \item \draftkey{Experimental components}capacity growth; class-conditional IR; matched fixed baselines; curricula; per-class evaluation; approximate paper-like widths
+  \item \draftkey{Testability}sufficient for central directional comparisons; insufficient for binary equivalence because of publication omissions
+\end{draftpoints}
+
+\subsection{What did not replicate}
+\begin{draftpoints}
+  \item \draftkey{MNIST}no NDL macro-MSE advantage in any replay regime
+  \item \draftkey{Intrinsic replay}higher error than clean replay; growth for every incoming class; all class/depth loops unresolved at allowance
+  \item \draftkey{SD-19}same negative reconstruction ordering; no complexity-driven reversal
+  \item \draftkey{Resources}substantially higher runtime, updates, and CUDA memory; no endpoint-quality compensation
+\end{draftpoints}
+
+\subsection{Mechanistic interpretation}
+\begin{draftpoints}
+  \item \draftkey{Local signal}successful poor-sample detection and growth trigger; no guarantee of improved end-to-end reconstruction
+  \item \draftkey{Protection trade-off}frozen mature features plus capacity protect old classes; excessive protection / weak coordination impair acquisition
+  \item \draftkey{Coupling evidence}modest end-to-end training sharply improves NDL; unchanged fundamental growth history
+  \item \draftkey{Matched-control evidence}CL still better after coupling; capacity and global optimization more explanatory than insertion timing
+  \item \draftkey{Literature link}function preservation; gradient-aware insertion; task isolation; resource-aware grow--prune as remedies for local-growth weaknesses \parencite{chen2016net2net,evci2022gradmax,maile2022north,rusu2016progressive,dai2018nest}
+\end{draftpoints}
+
+\subsection{Limitations}
+\begin{draftpoints}
+  \item \draftkey{Missing source}no authors' code or exact hyperparameters; result limited to documented paper-compatible interpretation
+  \item \draftkey{Seed depth}MNIST $n=10$; SD-19 and extensions $n=3$; latter = feasibility evidence
+  \item \draftkey{Metric comparability}possibly different error normalization and resource accounting; limited exact-magnitude comparison
+  \item \draftkey{Qualitative evidence}no complete matched checkpoints or grids; comprehensive numerical endpoints but incomplete visual replication
+  \item \draftkey{Search coverage}extensive, not exhaustive; unresolved optimizer, activation, and node-initialization alternatives
+\end{draftpoints}
+
+\subsection{Final conclusion}
+\begin{draftpoints}
+  \item \draftkey{Implementation}substantially achieved; explicit fidelity qualifications
+  \item \draftkey{Architecture}paper-like widths attainable; no organic-emergence evidence when allowances bind
+  \item \draftkey{Numerical verdict}rejected; matched fixed learners better in every replay regime
+  \item \draftkey{Qualitative verdict}pending controlled rerun with matched checkpoints and fixed samples
+  \item \draftkey{Extension verdict}global coupling useful; exact endpoint-sized conventional AE still favored
+  \item \draftkey{Broader criterion}acquisition + retention + organic stopping + endpoint quality + resource cost; not growth alone
+\end{draftpoints}
+
+\subsection{Manual conversion into full prose}
+\begin{draftpoints}
+  \item \draftkey{Expansion rule}one purple bullet $\rightarrow$ one paragraph; retain figures, tables, artifacts, citations
+  \item \draftkey{Boundary rule}keep confirmatory replication, missing qualitative evidence, and exploratory extensions separate
+  \item \draftkey{Precision rule}directional original comparison only; exact numerical claim only with machine-readable original data
+\end{draftpoints}

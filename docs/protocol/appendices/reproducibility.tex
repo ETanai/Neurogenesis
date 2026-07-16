@@ -1,0 +1,58 @@
+\section{Reproducibility and Artifact Map}
+
+\subsection{Commands and environment}
+\begin{draftpoints}
+  \item project environment is defined by \artifact{pyproject.toml}, \artifact{uv.lock}, and the source tree under \artifact{src/}; paper-shaped configurations are stored in \artifact{config/paper/}
+  \item Main paper configurations can be executed with the following command:
+  \begin{quote}\footnotesize\ttfamily
+  python scripts/run\_paper\_config.py\\
+  \hspace*{1em}--config config/paper/figure4.yaml
+  \end{quote}
+  \item compact suite runner is \texttt{python scripts/run\_paper\_experiments.py}
+  \item Portable data can be regenerated with the following command; report plots have dedicated scripts under \artifact{scripts/}:
+  \begin{quote}\footnotesize\ttfamily
+  python scripts/export\_replication\_figure\_data.py
+  \end{quote}
+  \item full protocol is compiled from \artifact{docs/protocol/main.tex} with two LaTeX passes around BibTeX
+\end{draftpoints}
+
+\subsection{Portable result tables and figures}
+\begin{table}[htbp]
+\centering
+\caption{Protocol figures and their portable source tables. Paths are relative to \artifact{docs/figures/replication/data/}.}
+\label{tab:figure-data-map}
+\scriptsize
+\begin{tabularx}{\textwidth}{p{4.3cm}Y}
+\toprule
+Figure & Portable data \\
+\midrule
+MNIST performance & \artifact{mnist_condition_metrics.csv}; \artifact{mnist_seed_metrics.csv} \\
+Claim-direction ratios & \artifact{mnist_claim_ratios.csv} \\
+Per-class MNIST & \artifact{mnist_per_class_summary.csv}; \artifact{mnist_per_class_seed.csv} \\
+Growth mechanism & \artifact{mnist_architecture.csv}; MNIST condition and seed tables \\
+SD-19 feasibility & \artifact{sd19_plotted_summary.csv}; \artifact{sd19_seed_metrics.csv}; \artifact{sd19_per_class_seed.csv} \\
+Cross-dataset ratios & \artifact{cross_dataset_ratios.csv} \\
+Training resources & \artifact{training_resource_conditions.csv}; \artifact{training_resource_ratios.csv} \\
+Predictive coding & \artifact{predictive_coding_aggregate.csv}; \artifact{predictive_coding_seed_metrics.csv} \\
+Post-replication optimization & three \artifact{post_replication_optimization_*.csv} tables \\
+Complete bundle & \artifact{replication_figure_base_data.json} \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Preserved and missing artifacts}
+\begin{draftpoints}
+  \item Preserved evidence includes the full implementation, experiment configurations, tests, reports, nine generated replication figures, tidy CSV tables, and an 8.46 MB consolidated JSON bundle
+  \item CSV exports contain 60 MNIST seed rows, 600 MNIST per-class seed rows, six SD-19 seed rows, 96 SD-19 per-class rows, predictive-coding results, optimization screens, and resource measurements
+  \item Only one local MLflow diagnostic run remains in the workspace; complete raw logs and checkpoints for the reported confirmation are absent
+  \item Raw MNIST and SD-19 datasets are not versioned and must be obtained through the configured data modules before rerunning experiments
+  \item Missing checkpoints prevent retrospective generation of the required matched qualitative grids; reruns should treat checkpoint retention and fixed-sample manifests as mandatory outputs
+\end{draftpoints}
+
+\subsection{Recommended rerun outputs}
+\begin{draftpoints}
+  \item Save the resolved configuration, code revision, environment lock, hardware description, and immutable dataset split for every seed
+  \item Save base, per-class, and final checkpoints for every confirmatory condition
+  \item Export the uniform trajectory schema in Table~\ref{tab:trajectory-schema} and qualitative manifest in Table~\ref{tab:qualitative-manifest}
+  \item Generate fixed-sample final and curriculum-step reconstruction grids immediately after each run so visual evidence does not depend on later checkpoint availability
+\end{draftpoints}

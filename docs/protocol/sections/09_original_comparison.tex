@@ -1,0 +1,57 @@
+\section{Comparison with the Original Results}
+
+\subsection{Original Figure 4}
+\begin{draftpoints}
+  \item original Figure 4 places NDL with intrinsic replay slightly below CL with intrinsic replay in reconstruction error and shows qualitatively more stable reconstructed digits \parencite{draelos2017neurogenesis}
+  \item original plot is treated as directional evidence because the underlying seed-level numerical table and confidence intervals are not available in the preserved paper source
+  \item replication therefore tests whether the direction of the matched comparison is reproduced, rather than claiming an exact difference from values estimated visually from the published graphic
+\end{draftpoints}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.70\textwidth]{original_figure4.png}
+\caption{Original paper Figure 4, reproduced for directional comparison. Panels compare CL, NDL, CL+IR, and NDL+IR and show the reported final reconstruction advantage of NDL+IR \parencite{draelos2017neurogenesis}.}
+\label{fig:original-figure4}
+\end{figure}
+
+\subsection{Claim-by-claim verdict}
+\begin{draftpoints}
+  \item Mechanism implementation is substantially reproduced: reconstruction-triggered layer growth, protected mature features, reduced-rate decoder updates, replay stabilization, and next-layer propagation are present
+  \item Architectural resemblance can be reproduced, but the closest paper-like endpoint is often explained by configured allowances rather than successful quota-based stopping
+  \item central numerical ordering is not reproduced: NDL+IR is 2.70 times worse than CL+IR in macro MSE and 2.06 times worse in positive forgetting
+  \item reported SD-19 advantage is not reproduced in the three-seed feasibility comparison, where matched CL is better in reconstruction, forgetting, updates, and runtime
+  \item expected constant-factor overhead is not supported by the endpoint-matched resource benchmark, especially for intrinsic replay
+\end{draftpoints}
+
+\begin{table}[htbp]
+\centering
+\caption{Original claims versus replication observations. ``Directional'' indicates that the original paper does not expose exact seed-level values for a numerical equality test.}
+\label{tab:original-versus-replication}
+\small
+\begin{tabularx}{\textwidth}{p{3.0cm}YYp{2.4cm}}
+\toprule
+Claim & Original conclusion & Replication observation & Status \\
+\midrule
+NDL+IR beats CL+IR & Slight reconstruction advantage & 2.70$\times$ higher macro MSE & Not replicated \\
+NDL+IR preserves old classes & Better qualitative stability & 2.06$\times$ positive forgetting & Not replicated \\
+Growth discovers useful size & Capacity added as needed & Many loops end at allowances with unresolved outliers & Not demonstrated \\
+No-replay growth improves continual learning & Growth protects representations & Forgetting improves, total MSE worsens 1.91$\times$ & Partial trade-off \\
+SD-19 supports growth & NDL+IR below CL+IR error & NDL about 1.85$\times$ macro MSE & Not replicated \\
+Overhead remains moderate & Constant-factor argument & Up to 6.88$\times$ runtime in controlled benchmark & Not supported \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.94\textwidth]{cross_dataset_effects.png}
+\caption{Cross-dataset ratios for matched NDL and CL comparisons. Ratios above one indicate worse NDL reconstruction, forgetting, or update cost. Source: \artifact{cross_dataset_ratios.csv}.}
+\label{fig:cross-dataset-effects}
+\end{figure}
+
+\subsection{Interpretive boundary}
+\begin{draftpoints}
+  \item evidence rejects a numerical replication claim for this implementation but does not establish that neuron growth can never improve continual learning
+  \item publication's underspecified optimizer, activation, threshold, quota, phase schedule, and node-count policy leave a family of plausible implementations rather than one exactly recoverable experiment
+  \item negative matched comparisons show that reproducing the stated mechanism and approximate endpoint shape is insufficient to reproduce the reported performance advantage
+\end{draftpoints}

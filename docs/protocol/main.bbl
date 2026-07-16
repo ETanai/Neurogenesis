@@ -1,0 +1,147 @@
+\begin{thebibliography}{20}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Chen et~al.(2016)Chen, Goodfellow, and Shlens]{chen2016net2net}
+Tianqi Chen, Ian Goodfellow, and Jonathon Shlens.
+\newblock Net2net: Accelerating learning via knowledge transfer.
+\newblock In \emph{International Conference on Learning Representations}, 2016.
+
+\bibitem[Dai et~al.(2019)Dai, Yin, and Jha]{dai2018nest}
+Xiaoliang Dai, Hongxu Yin, and Niraj~K. Jha.
+\newblock Nest: A neural network synthesis tool based on a grow-and-prune
+  paradigm.
+\newblock \emph{IEEE Transactions on Computers}, 68\penalty0 (10):\penalty0
+  1487--1497, 2019.
+
+\bibitem[Draelos et~al.(2017)Draelos, Miner, Lamb, Cox, Vineyard, Carlson,
+  Severa, James, and Aimone]{draelos2017neurogenesis}
+Timothy~J. Draelos, Nadine~E. Miner, Christopher~C. Lamb, Jonathan~A. Cox,
+  Craig~M. Vineyard, Kristofor~D. Carlson, William~M. Severa, Conrad~D. James,
+  and James~B. Aimone.
+\newblock Neurogenesis deep learning: Extending deep networks to accommodate
+  new classes.
+\newblock In \emph{2017 International Joint Conference on Neural Networks
+  (IJCNN)}, pages 526--533, 2017.
+\newblock \doi{10.1109/IJCNN.2017.7965898}.
+\newblock URL \url{http://arxiv.org/abs/1612.03770}.
+
+\bibitem[Evci et~al.(2020)Evci, Gale, Menick, Castro, and
+  Elsen]{evci2020rigging}
+Utku Evci, Trevor Gale, Jacob Menick, Pablo~Samuel Castro, and Erich Elsen.
+\newblock Rigging the lottery: Making all tickets winners.
+\newblock In \emph{International Conference on Machine Learning}, volume 119 of
+  \emph{Proceedings of Machine Learning Research}, pages 2943--2952, 2020.
+
+\bibitem[Evci et~al.(2022)Evci, van Merri{\"e}nboer, Unterthiner, Vladymyrov,
+  and Pedregosa]{evci2022gradmax}
+Utku Evci, Bart van Merri{\"e}nboer, Thomas Unterthiner, Max Vladymyrov, and
+  Fabian Pedregosa.
+\newblock Gradmax: Growing neural networks using gradient information.
+\newblock In \emph{International Conference on Learning Representations}, 2022.
+
+\bibitem[Fahlman and Lebiere(1990)]{fahlman1990cascade}
+Scott~E. Fahlman and Christian Lebiere.
+\newblock The cascade-correlation learning architecture.
+\newblock In \emph{Advances in Neural Information Processing Systems},
+  volume~2, pages 524--532, 1990.
+
+\bibitem[Fernando et~al.(2017)Fernando, Banarse, Blundell, Zwols, Ha, Rusu,
+  Pritzel, and Wierstra]{fernando2017pathnet}
+Chrisantha Fernando, Dylan Banarse, Charles Blundell, Yori Zwols, David Ha,
+  Andrei~A. Rusu, Alexander Pritzel, and Daan Wierstra.
+\newblock Pathnet: Evolution channels gradient descent in super neural
+  networks.
+\newblock \emph{arXiv preprint arXiv:1701.08734}, 2017.
+
+\bibitem[Gordon et~al.(2018)Gordon, Eban, Nachum, Chen, Wu, Yang, and
+  Choi]{gordon2018morphnet}
+Ariel Gordon, Elad Eban, Ofir Nachum, Bo~Chen, Hao Wu, Tien-Ju Yang, and Edward
+  Choi.
+\newblock Morphnet: Fast and simple resource-constrained structure learning of
+  deep networks.
+\newblock In \emph{Proceedings of the IEEE Conference on Computer Vision and
+  Pattern Recognition}, pages 1586--1595, 2018.
+\newblock \doi{10.1109/CVPR.2018.00171}.
+
+\bibitem[Guo et~al.(2016)Guo, Yao, and Chen]{guo2016dynamic}
+Yiwen Guo, Anbang Yao, and Yurong Chen.
+\newblock Dynamic network surgery for efficient dnns.
+\newblock In \emph{Advances in Neural Information Processing Systems}, 2016.
+
+\bibitem[Han et~al.(2015)Han, Pool, Tran, and Dally]{han2015deep}
+Song Han, Jeff Pool, John Tran, and William~J. Dally.
+\newblock Learning both weights and connections for efficient neural networks.
+\newblock In \emph{Advances in Neural Information Processing Systems}, 2015.
+
+\bibitem[Li et~al.(2019)Li, Zhou, Wu, Socher, and Xiong]{li2019learn}
+Xilai Li, Yingbo Zhou, Tianfu Wu, Richard Socher, and Caiming Xiong.
+\newblock Learn to grow: A continual structure learning framework for
+  overcoming catastrophic forgetting.
+\newblock In \emph{International Conference on Machine Learning}, volume~97 of
+  \emph{Proceedings of Machine Learning Research}, pages 3925--3934, 2019.
+
+\bibitem[Liu et~al.(2019)Liu, Simonyan, and Yang]{liu2019darts}
+Hanxiao Liu, Karen Simonyan, and Yiming Yang.
+\newblock Darts: Differentiable architecture search.
+\newblock In \emph{International Conference on Learning Representations}, 2019.
+
+\bibitem[Liu et~al.(2017)Liu, Li, Shen, Huang, Yan, and Zhang]{liu2017network}
+Zhuang Liu, Jianguo Li, Zhiqiang Shen, Gao Huang, Shoumeng Yan, and Changshui
+  Zhang.
+\newblock Learning efficient convolutional networks through network slimming.
+\newblock In \emph{Proceedings of the IEEE International Conference on Computer
+  Vision}, pages 2755--2763, 2017.
+\newblock \doi{10.1109/ICCV.2017.298}.
+
+\bibitem[Louizos et~al.(2018)Louizos, Welling, and Kingma]{louizos2018learning}
+Christos Louizos, Max Welling, and Diederik~P. Kingma.
+\newblock Learning sparse neural networks through l0 regularization.
+\newblock In \emph{International Conference on Learning Representations}, 2018.
+
+\bibitem[Maile et~al.(2022)Maile, Rachelson, Luga, and Wilson]{maile2022north}
+Kaitlin Maile, Emmanuel Rachelson, Herv{\'e} Luga, and Dennis~G. Wilson.
+\newblock When, where, and how to add new neurons to {ANNs}.
+\newblock In \emph{Proceedings of the First Conference on Lifelong Learning
+  Agents}, volume 188 of \emph{Proceedings of Machine Learning Research}, pages
+  18/1--18/12, 2022.
+\newblock URL \url{https://proceedings.mlr.press/v188/maile22a.html}.
+
+\bibitem[Mocanu et~al.(2018)Mocanu, Mocanu, Stone, Nguyen, Gibescu, and
+  Liotta]{mocanu2018scalable}
+Decebal~Constantin Mocanu, Elena Mocanu, Peter Stone, Phuong~H. Nguyen,
+  Madeleine Gibescu, and Antonio Liotta.
+\newblock Scalable training of artificial neural networks with adaptive sparse
+  connectivity inspired by network science.
+\newblock \emph{Nature Communications}, 9\penalty0 (1):\penalty0 2383, 2018.
+\newblock \doi{10.1038/s41467-018-04316-3}.
+
+\bibitem[Rusu et~al.(2016)Rusu, Rabinowitz, Desjardins, Soyer, Kirkpatrick,
+  Kavukcuoglu, Pascanu, and Hadsell]{rusu2016progressive}
+Andrei~A. Rusu, Neil~C. Rabinowitz, Guillaume Desjardins, Hubert Soyer, James
+  Kirkpatrick, Koray Kavukcuoglu, Razvan Pascanu, and Raia Hadsell.
+\newblock Progressive neural networks.
+\newblock \emph{arXiv preprint arXiv:1606.04671}, 2016.
+
+\bibitem[Wei et~al.(2016)Wei, Wang, Rui, and Chen]{wei2016network}
+Tao Wei, Changhu Wang, Yong Rui, and Chang~Wen Chen.
+\newblock Network morphism.
+\newblock In \emph{International Conference on Machine Learning}, volume~48 of
+  \emph{Proceedings of Machine Learning Research}, 2016.
+
+\bibitem[Yan et~al.(2021)Yan, Xie, and He]{yan2021der}
+Shipeng Yan, Jiangwei Xie, and Xuming He.
+\newblock Dynamically expandable representation for class incremental learning.
+\newblock In \emph{Proceedings of the IEEE/CVF Conference on Computer Vision
+  and Pattern Recognition}, pages 3014--3023, 2021.
+\newblock \doi{10.1109/CVPR46437.2021.00303}.
+
+\bibitem[Yoon et~al.(2018)Yoon, Yang, Lee, and Hwang]{yoon2018den}
+Jaehong Yoon, Eunho Yang, Jeongtae Lee, and Sung~Ju Hwang.
+\newblock Lifelong learning with dynamically expandable networks.
+\newblock In \emph{International Conference on Learning Representations}, 2018.
+
+\end{thebibliography}

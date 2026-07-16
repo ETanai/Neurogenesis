@@ -9,6 +9,7 @@
 # 3. Un-ignore any .py files
 !*.py
 !*.toml
+!uv.lock
 
 !*/ae.yaml
 !*/ng_autoencoder.yaml
@@ -24,7 +25,17 @@
 !docs/figures/replication/*.png
 !docs/figures/replication/data/*.csv
 !docs/figures/replication/data/*.json
+!docs/protocol/**
 !docs/papers/**
+
+# LaTeX build products
+*.aux
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.pdf
+*.synctex.gz
 
 __pycache__/
 *.py[cod]

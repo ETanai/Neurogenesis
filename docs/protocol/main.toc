@@ -1,0 +1,67 @@
+\contentsline {section}{\numberline {1}Introduction and Research Questions}{3}{section.1}%
+\contentsline {subsection}{\numberline {1.1}Problem and motivation}{3}{subsection.1.1}%
+\contentsline {subsection}{\numberline {1.2}Confirmatory research questions}{3}{subsection.1.2}%
+\contentsline {subsection}{\numberline {1.3}Exploratory and qualitative questions}{3}{subsection.1.3}%
+\contentsline {subsection}{\numberline {1.4}Scope and evidential boundaries}{3}{subsection.1.4}%
+\contentsline {section}{\numberline {2}Dynamic-Capacity Neural Networks}{3}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Taxonomy}{3}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Constructive and continual expansion}{4}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Removal, rewiring, and morphism}{4}{subsection.2.3}%
+\contentsline {subsection}{\numberline {2.4}Positioning statement}{5}{subsection.2.4}%
+\contentsline {section}{\numberline {3}Original NDL Architecture and Claims}{5}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Architecture and growth rule}{5}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}Intrinsic replay}{6}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}Published experimental claims}{6}{subsection.3.3}%
+\contentsline {section}{\numberline {4}Replication Architecture and Implementation}{7}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Software architecture}{7}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Replication execution pipeline}{7}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}Paper-to-code fidelity}{7}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}Architecture definitions}{8}{subsection.4.4}%
+\contentsline {subsection}{\numberline {4.5}Capacity matching}{8}{subsection.4.5}%
+\contentsline {section}{\numberline {5}Experimental Design}{9}{section.5}%
+\contentsline {subsection}{\numberline {5.1}Factorial confirmatory comparison}{9}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}Outcomes}{9}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.3}Class-level analysis}{9}{subsection.5.3}%
+\contentsline {subsection}{\numberline {5.4}Confirmatory versus exploratory evidence}{10}{subsection.5.4}%
+\contentsline {section}{\numberline {6}Parameter Selection and Optimization}{10}{section.6}%
+\contentsline {subsection}{\numberline {6.1}Fidelity boundary}{10}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}Optimization sequence}{11}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}Organic-growth evidence}{11}{subsection.6.3}%
+\contentsline {subsection}{\numberline {6.4}Post-replication promotion gate}{12}{subsection.6.4}%
+\contentsline {section}{\numberline {7}Training Behavior of the Compared Approaches}{12}{section.7}%
+\contentsline {subsection}{\numberline {7.1}Expected behavioral signatures}{12}{subsection.7.1}%
+\contentsline {subsection}{\numberline {7.2}Observed MNIST behavior}{13}{subsection.7.2}%
+\contentsline {subsection}{\numberline {7.3}Growth-stop behavior}{13}{subsection.7.3}%
+\contentsline {subsection}{\numberline {7.4}SD-19 behavior}{13}{subsection.7.4}%
+\contentsline {subsection}{\numberline {7.5}Trajectory data required for a complete behavioral account}{14}{subsection.7.5}%
+\contentsline {section}{\numberline {8}Quantitative Replication Results}{14}{section.8}%
+\contentsline {subsection}{\numberline {8.1}Ten-seed MNIST confirmation}{14}{subsection.8.1}%
+\contentsline {subsection}{\numberline {8.2}Claim-direction ratios}{14}{subsection.8.2}%
+\contentsline {subsection}{\numberline {8.3}Per-class reconstruction}{14}{subsection.8.3}%
+\contentsline {subsection}{\numberline {8.4}SD-19 feasibility comparison}{16}{subsection.8.4}%
+\contentsline {subsection}{\numberline {8.5}Training resources}{16}{subsection.8.5}%
+\contentsline {section}{\numberline {9}Comparison with the Original Results}{18}{section.9}%
+\contentsline {subsection}{\numberline {9.1}Original Figure 4}{18}{subsection.9.1}%
+\contentsline {subsection}{\numberline {9.2}Claim-by-claim verdict}{18}{subsection.9.2}%
+\contentsline {subsection}{\numberline {9.3}Interpretive boundary}{19}{subsection.9.3}%
+\contentsline {section}{\numberline {10}Qualitative Reconstruction Comparison}{19}{section.10}%
+\contentsline {subsection}{\numberline {10.1}Original qualitative evidence}{19}{subsection.10.1}%
+\contentsline {subsection}{\numberline {10.2}Preserved local diagnostic}{20}{subsection.10.2}%
+\contentsline {subsection}{\numberline {10.3}Required matched reconstruction grid}{20}{subsection.10.3}%
+\contentsline {subsection}{\numberline {10.4}Qualitative interpretation rules}{21}{subsection.10.4}%
+\contentsline {section}{\numberline {11}Post-Replication Extensions}{21}{section.11}%
+\contentsline {subsection}{\numberline {11.1}Predictive-coding optimizer}{21}{subsection.11.1}%
+\contentsline {subsection}{\numberline {11.2}Global reconstruction coupling}{22}{subsection.11.2}%
+\contentsline {subsection}{\numberline {11.3}Status of extension evidence}{23}{subsection.11.3}%
+\contentsline {section}{\numberline {12}Discussion and Conclusion}{24}{section.12}%
+\contentsline {subsection}{\numberline {12.1}What was reproduced}{24}{subsection.12.1}%
+\contentsline {subsection}{\numberline {12.2}What did not replicate}{24}{subsection.12.2}%
+\contentsline {subsection}{\numberline {12.3}Mechanistic interpretation}{24}{subsection.12.3}%
+\contentsline {subsection}{\numberline {12.4}Limitations}{25}{subsection.12.4}%
+\contentsline {subsection}{\numberline {12.5}Final conclusion}{25}{subsection.12.5}%
+\contentsline {subsection}{\numberline {12.6}Manual conversion into full prose}{25}{subsection.12.6}%
+\contentsline {section}{\numberline {A}Reproducibility and Artifact Map}{25}{appendix.A}%
+\contentsline {subsection}{\numberline {A.1}Commands and environment}{25}{subsection.A.1}%
+\contentsline {subsection}{\numberline {A.2}Portable result tables and figures}{26}{subsection.A.2}%
+\contentsline {subsection}{\numberline {A.3}Preserved and missing artifacts}{26}{subsection.A.3}%
+\contentsline {subsection}{\numberline {A.4}Recommended rerun outputs}{26}{subsection.A.4}%

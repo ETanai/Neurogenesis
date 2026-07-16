@@ -1,4 +1,4 @@
-# Notebook-driven experiment workflow plan
+#  ^Notebook-driven experiment workflow plan
 
 This guide captures how to reuse the legacy notebook scripts while the main
 Lightning CLI is still incomplete.  It combines an orientation to the existing

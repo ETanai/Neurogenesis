@@ -1,0 +1,94 @@
+\section{Replication Architecture and Implementation}
+
+\subsection{Software architecture}
+\begin{draftpoints}
+  \item implementation separates expandable model layers, base pretraining, incremental learning, neurogenesis control, replay generation, threshold estimation, experiment configuration, and artifact export into independently testable components
+  \item \artifact{src/models/ng_linear.py} resizes dense layers while preserving mature parameters, and \artifact{src/models/ng_autoencoder.py} coordinates symmetric encoder--decoder expansion
+  \item \artifact{src/training/neurogenesis_trainer.py} implements outlier selection, layer-local growth, plasticity, stability, next-layer propagation, and growth diagnostics
+  \item \artifact{src/utils/intrinsic_replay.py} fits and samples class-conditional latent Gaussians, while \artifact{src/utils/dataset_replay.py} provides an original-data upper-bound control
+  \item Paper configurations are stored under \artifact{config/paper/}; executable experiment, ablation, plotting, resource, and export workflows are stored under \artifact{scripts/}
+\end{draftpoints}
+
+\subsection{Replication execution pipeline}
+\begin{figure}[htbp]
+\centering
+\resizebox{0.88\textwidth}{!}{%
+\begin{tikzpicture}[
+  node distance=7mm,
+  box/.style={draw,rounded corners,minimum width=49mm,minimum height=8mm,align=center,font=\small},
+  decision/.style={draw,diamond,aspect=2.4,align=center,font=\scriptsize,inner sep=1.5pt},
+  arrow/.style={-{Latex[length=2mm]},thick},
+  note/.style={font=\scriptsize,align=left,text width=38mm}
+]
+\node[box,fill=ProtocolBlue] (base) {Pretrain stacked autoencoder\\on base classes 1 and 7};
+\node[box,below=of base] (threshold) {Estimate per-depth reconstruction thresholds\\and store replay statistics};
+\node[box,below=of threshold,fill=ProtocolLightPurple] (class) {Introduce the next curriculum class};
+\node[box,below=of class] (evaluate) {Compute global reconstruction error\\at every depth};
+\node[decision,below=8mm of evaluate] (grow) {Outliers exceed\\allowed quota?};
+\node[box,below left=8mm and 15mm of grow,fill=ProtocolRed] (local) {Add neurons; local plasticity\\and replay stabilization};
+\node[box,below right=8mm and 15mm of grow,fill=ProtocolBlue] (finish) {Finalize class; refresh replay\\statistics and evaluate all classes};
+\draw[arrow] (base) -- (threshold);
+\draw[arrow] (threshold) -- (class);
+\draw[arrow] (class) -- (evaluate);
+\draw[arrow] (evaluate) -- (grow);
+\draw[arrow] (grow) -- node[above left,font=\scriptsize]{yes} (local);
+\draw[arrow] (grow) -- node[above right,font=\scriptsize]{no / cap} (finish);
+\draw[arrow] (local.west) -| ++(-10mm,0) |- (evaluate.west);
+\draw[arrow] (finish.east) -| ++(10mm,0) |- node[pos=.25,right,font=\scriptsize]{next class} (class.east);
+\end{tikzpicture}
+}
+\caption{Implemented replication pipeline. The local growth loop repeats within each autoencoder depth until the outlier quota is satisfied or the applicable growth allowance is exhausted.}
+\label{fig:replication-pipeline}
+\end{figure}
+
+\subsection{Paper-to-code fidelity}
+\begin{draftpoints}
+  \item implementation matches the high-level operations of Algorithm 1 after corrections to outlier identity, tensor cloning, replay isolation, threshold provenance, and experiment-regime selection
+  \item Paper-oriented configurations use partial global reconstruction error for selecting incoming-class outliers, but train new features through an isolated single-hidden-layer autoencoder objective
+  \item Mature encoder weights remain frozen during plasticity, decoder weights receive the reduced learning rate, and replay stabilization operates at the current level
+  \item Literal equivalence cannot be claimed because several consequential choices are undocumented in the paper and must be resolved by transparent configuration
+\end{draftpoints}
+
+\begin{table}[htbp]
+\centering
+\caption{Condensed operation-level fidelity map; the complete audit is preserved in \artifact{docs/algorithm_fidelity.md}.}
+\label{tab:fidelity-map}
+\small
+\begin{tabularx}{\textwidth}{p{3.9cm}p{4.4cm}p{1.9cm}Y}
+\toprule
+Published operation & Local implementation & Status & Consequence \\
+\midrule
+Global reconstruction error at each depth & Partial encode--decode forward pass and per-sample MSE & Match & Growth responds to pixel reconstruction demand \\
+Select incoming-class outliers & Indexed incoming-class subset above threshold & Match & Replay samples cannot become growth candidates \\
+Add and train new local nodes & Expandable linear layers plus local SHL-AE & Match & Local growth objective follows Algorithm 1 \\
+Freeze mature encoder during plasticity & Gradient masks / selected parameter scope & Match & Existing feature detectors are protected \\
+Decoder and stability rate $LR/100$ & Explicit learning-rate ratios & Match & Published stability asymmetry is retained \\
+Class-conditional Gaussian replay & Mean, covariance factor, latent sampling, decoding & Match & No old images are reopened in IR conditions \\
+Optimizer, activation, exact phase lengths & Configured, because publication is silent & Unspecified & Paper-compatible values require sensitivity analysis \\
+Number of nodes added per round & Absolute or proportional policy & Unspecified & Architecture can become cap-driven \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Architecture definitions}
+\begin{table}[htbp]
+\centering
+\caption{Dataset, architecture, and curriculum definitions used in the replication.}
+\label{tab:architecture-definitions}
+\small
+\begin{tabularx}{\textwidth}{p{1.5cm}p{1.4cm}p{3.0cm}p{3.0cm}p{2.4cm}Y}
+\toprule
+Dataset & Input & Initial encoder & Mirrored decoder & Base classes & Incremental curriculum \\
+\midrule
+MNIST & $28\times28$ & $[200,100,75,20]$ & $[75,100,200,784]$ & $[1,7]$ & $[0,2,3,4,$ $5,6,8,9]$ \\
+SD-19 & $28\times28$ & $[1000,500,250,50]$ & $[250,500,1000,784]$ & digits $0$--$9$ & uppercase and lowercase letters; feasibility subset in exported results \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Capacity matching}
+\begin{draftpoints}
+  \item conventional learner is initialized or retrained at the exact final encoder width reached by its paired NDL run, preventing a larger endpoint network from being credited as a growth-mechanism advantage
+  \item Capacity matching is performed within replay regime and seed wherever endpoint widths vary; the corrected no-replay comparison uses each NDL seed's exact endpoint
+  \item cumulative-cap reference is retained only as an architecture-shape comparison because its width is imposed by growth allowances rather than demonstrated to emerge organically
+\end{draftpoints}

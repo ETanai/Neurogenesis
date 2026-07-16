@@ -1,0 +1,85 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=2.3cm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{enumitem}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{url}
+\usepackage{float}
+\usepackage{placeins}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{tikz}
+\usepackage{etoolbox}
+\usepackage[round,authoryear]{natbib}
+\usepackage[colorlinks=true,linkcolor=MidnightBlue,citecolor=MidnightBlue,urlcolor=MidnightBlue]{hyperref}
+
+\usetikzlibrary{arrows.meta,positioning,fit,shapes.geometric,calc}
+
+\definecolor{ProtocolPurple}{HTML}{64278F}
+\definecolor{ProtocolLightPurple}{HTML}{EFE5F5}
+\definecolor{ProtocolBlue}{HTML}{DCECF7}
+\definecolor{ProtocolRed}{HTML}{F8DEDE}
+
+\newcommand{\parencite}[1]{\citep{#1}}
+\DeclareRobustCommand{\artifact}[1]{\nolinkurl{#1}}
+\newcommand{\missingartifact}[1]{\textcolor{BrickRed}{\textbf{Required artifact:} #1}}
+\newcommand{\result}[1]{\textbf{#1}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+
+\graphicspath{{figures/}}
+
+\setlist[enumerate]{leftmargin=*,topsep=0.35em,itemsep=0.32em}
+\newenvironment{draftpoints}
+  {\begin{itemize}[leftmargin=*,topsep=0.35em,itemsep=0.32em,parsep=0.1em]\color{ProtocolPurple}}
+  {\end{itemize}}
+\newcommand{\draftkey}[1]{\textbf{#1}~---~}
+\captionsetup{font=small,labelfont=bf}
+
+\title{Replication Protocol: Neurogenesis Deep Learning and Dynamic-Capacity Neural Architectures}
+\author{Bullet-based writing draft}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\begin{draftpoints}
+  \item \draftkey{Scope}local NDL replication; parameter and mechanism studies; dynamic-capacity literature
+  \item \draftkey{Main test}reconstruction-triggered growth versus exact capacity-matched CL; no replay, original-data replay, intrinsic replay
+  \item \draftkey{Writing convention}purple = replace with prose; one compact fragment per future paragraph; retain attached evidence and citations
+\end{draftpoints}
+\end{abstract}
+
+\tableofcontents
+\clearpage
+
+\input{sections/01_introduction}
+\input{sections/02_dynamic_capacity_background}
+\input{sections/03_original_ndl}
+\input{sections/04_replication_implementation}
+\input{sections/05_experimental_design}
+\input{sections/06_parameter_optimization}
+\input{sections/07_training_behavior}
+\input{sections/08_quantitative_results}
+\input{sections/09_original_comparison}
+\input{sections/10_qualitative_results}
+\input{sections/11_extensions}
+\input{sections/12_discussion}
+
+\appendix
+\input{appendices/reproducibility}
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}

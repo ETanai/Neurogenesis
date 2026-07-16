@@ -1,0 +1,66 @@
+\section{Training Behavior of the Compared Approaches}
+
+\subsection{Expected behavioral signatures}
+\begin{draftpoints}
+  \item Fixed CL without replay should acquire the incoming class through global parameter updates but is expected to overwrite earlier representations because no historical signal constrains those updates
+  \item NDL without replay protects mature encoder features during local plasticity and adds capacity, so it may reduce forgetting even if its local objective yields worse total reconstruction
+  \item Original-data replay provides the strongest stabilization signal and therefore separates growth quality from replay-generation quality
+  \item Intrinsic replay can preserve old representations only if its latent Gaussian samples decode into sufficiently faithful old-class images; poor replay can simultaneously distort stabilization and the thresholds used to judge novelty
+  \item method that reports low forgetting but high incoming-class error is stable but insufficiently plastic; both acquisition and retention must therefore be shown
+\end{draftpoints}
+
+\subsection{Observed MNIST behavior}
+\begin{draftpoints}
+  \item CL with original-data replay has the best confirmatory reconstruction endpoint and nearly zero positive forgetting, showing that a fixed network of the final capacity can learn the curriculum when clean old-class samples remain available
+  \item NDL with original-data replay also retains old classes well, but its macro MSE is more than three times the matched CL value; local growth and stabilization do not convert the added parameters into equally useful global reconstructions
+  \item NDL without replay forgets less than matched CL without replay (0.00187 versus 0.00897 positive forgetting), but its macro MSE is 1.91 times larger; growth yields a real retention trade-off rather than a complete continual-learning improvement
+  \item NDL with intrinsic replay updates every incoming class, reaches the same large endpoint $[232,140,91,44]$ in every seed, and exhausts every class/depth growth loop without reaching the accepted outlier quota
+  \item intrinsic condition requires about 88,292 incremental model updates on average, compared with 1,113 for its matched CL control, yet ends with higher reconstruction error and higher forgetting
+\end{draftpoints}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{mechanism_comparison.png}
+\caption{Mechanism-level comparison of endpoint capacity, growth behavior, and performance. The figure combines architecture and diagnostic outcomes so that a paper-like final width is not interpreted independently of cap exhaustion and reconstruction quality. Source tables: \artifact{mnist_architecture.csv}, \artifact{mnist_condition_metrics.csv}, and \artifact{mnist_seed_metrics.csv}.}
+\label{fig:mechanism-comparison}
+\end{figure}
+
+\subsection{Growth-stop behavior}
+\begin{draftpoints}
+  \item Quota-stop fraction is the share of growth loops that stop because error demand has been satisfied; a value near one supports organic growth, while a value near zero indicates that the architecture is limited by an allowance
+  \item Clean-replay and no-replay NDL reach a mean quota-stop fraction of 0.875 because growth occurs in a minority of class-level combinations and most evaluated loops require no update
+  \item Intrinsic-replay NDL has quota-stop fraction 0.000, updated-class fraction 1.000, and 32 unresolved exhausted level loops in every seed, indicating systematic rather than isolated novelty pressure
+  \item fixed endpoint under intrinsic replay is therefore not evidence that the same useful architecture emerged repeatedly; it is evidence that the configured allowances bound the same repeated failure mode
+\end{draftpoints}
+
+\subsection{SD-19 behavior}
+\begin{draftpoints}
+  \item Both SD-19 conditions end at $[1100,600,350,70]$, so the comparison holds parameter count constant at 3,518,754
+  \item NDL uses roughly 7,147--7,432 model updates compared with 72 for CL and still has about twice the macro and foreground reconstruction error
+  \item NDL stops only 12.5\% of loops by quota and retains 21 unresolved exhausted levels per seed, showing that greater task complexity does not resolve the cap-driven behavior
+\end{draftpoints}
+
+\subsection{Trajectory data required for a complete behavioral account}
+\begin{draftpoints}
+  \item preserved export supports seed endpoints, per-class final errors, and detailed growth reports for selected conditions, but it does not contain a uniform cross-condition time series after every curriculum step
+  \item future matched rerun should export one row per condition, seed, class step, and depth with incoming MSE, old-class MSE, widths before and after growth, nodes added, threshold, initial and final outliers, stop reason, updates, and runtime
+  \item \missingartifact{A complete \artifact{training_trajectory.csv} is needed before drawing class-step curves for all six confirmatory conditions; no trajectory curve is inferred from endpoint tables.}
+\end{draftpoints}
+
+\begin{table}[htbp]
+\centering
+\caption{Schema proposed for the missing uniform training-trajectory export.}
+\label{tab:trajectory-schema}
+\scriptsize
+\begin{tabularx}{\textwidth}{p{2.8cm}Y}
+\toprule
+Field group & Required columns \\
+\midrule
+Identity & condition, seed, class step, class ID, autoencoder depth \\
+Performance & macro MSE, incoming-class MSE, old-class MSE, positive forgetting \\
+Growth & width before, width after, nodes requested, nodes accepted, growth rounds \\
+Outliers & threshold, initial outliers, final outliers, allowed outliers, stop reason \\
+Cost & plasticity updates, stability updates, next-layer updates, cumulative runtime \\
+\bottomrule
+\end{tabularx}
+\end{table}

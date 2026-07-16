@@ -1,0 +1,84 @@
+\section{Experimental Design}
+
+\subsection{Factorial confirmatory comparison}
+\begin{draftpoints}
+  \item main MNIST design crosses architecture update type (fixed CL versus growing NDL) with replay regime (none, original data, or intrinsic replay)
+  \item Original-data replay is an oracle upper bound because it reopens historical images; intrinsic replay is the paper-shaped memory condition because it stores only latent class statistics
+  \item Ten independent seeds, 42--51, are used for the full MNIST confirmation; two-sided Student-$t$ confidence intervals summarize seed variability
+  \item principal comparisons are paired within replay regime: NDL versus its exact capacity-matched CL control
+\end{draftpoints}
+
+\begin{table}[htbp]
+\centering
+\caption{Complete experiment matrix and evidential role of each family.}
+\label{tab:experiment-matrix}
+\small
+\begin{tabularx}{\textwidth}{p{2.7cm}p{1.4cm}p{2.1cm}p{2.4cm}p{1.5cm}Y}
+\toprule
+Condition & Growth & Replay & Capacity relation & Seeds & Purpose \\
+\midrule
+CL, no replay & No & None & Matched to NDL seed & 42--51 & Fixed learner without memory \\
+NDL, no replay & Yes & None & Organic endpoint & 42--51 & Isolate growth without memory \\
+CL + original data & No & Old images & Matched to NDL & 42--51 & Clean replay upper bound \\
+NDL + original data & Yes & Old images & Organic endpoint & 42--51 & Growth with ideal replay \\
+CL + intrinsic replay & No & Latent Gaussian & Matched to NDL & 42--51 & Isolate generated replay \\
+NDL + intrinsic replay & Yes & Latent Gaussian & Organic endpoint & 42--51 & Central paper-shaped condition \\
+SD-19 CL / NDL & No / Yes & Original data & Paired endpoints & 42--44 & Larger-dataset feasibility \\
+Organic-growth screens & Yes & Original data & Multiple policies & seed 42 & Test whether demand, not caps, determines width \\
+Predictive coding & No & None / original & Fixed endpoint & 42--44 & Post-replication optimizer extension \\
+Optimized NDL / CL & Yes / No & Original data & Exact endpoint & 45--47 & Post-replication global-coupling extension \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Outcomes}
+\begin{draftpoints}
+  \item Macro MSE gives equal weight to each learned class and is the primary endpoint because class frequencies should not dominate the continual-learning comparison
+  \item Foreground-pixel MSE emphasizes reconstruction of digit or character strokes rather than the mostly black background
+  \item Mean positive forgetting averages only increases in old-class error, separating retention failures from improvements that can make signed averages misleading
+  \item Structural outcomes include final encoder widths, nodes added per layer, quota-stop fraction, updated-class fraction, and unresolved exhausted levels
+  \item Efficiency outcomes include parameter count, pretraining and incremental update counts, wall time, peak CUDA allocation and reservation, and peak process resident memory
+\end{draftpoints}
+
+\subsection{Class-level analysis}
+\begin{draftpoints}
+  \item Per-class results separate the initially learned digits 1 and 7 from early and late incoming classes
+  \item Incoming-class error measures plasticity, while changes in earlier classes measure stability; both are required because a method can retain old classes by failing to learn the new class
+  \item preserved per-class dataset contains 600 MNIST seed observations and 96 SD-19 seed observations, enabling class-specific comparison without relying on a single aggregate score
+\end{draftpoints}
+
+\subsection{Confirmatory versus exploratory evidence}
+\begin{draftpoints}
+  \item Paper-compatible parameter screens are used to resolve undocumented implementation choices before the frozen full-curriculum confirmation
+  \item Global reconstruction coupling, predictive coding, and usage-dependent plasticity change the paper mechanism and therefore cannot rescue the original replication claim even if they improve performance
+  \item SD-19 is described as a feasibility comparison because only three seeds and a restricted follow-up are preserved, not the complete twenty-order curriculum of the original paper
+\end{draftpoints}
+
+\begin{figure}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+node distance=7mm and 8mm,
+stage/.style={draw,rounded corners,minimum width=30mm,minimum height=10mm,align=center,font=\scriptsize},
+gate/.style={draw,diamond,aspect=2.2,align=center,font=\scriptsize,inner sep=1pt},
+arrow/.style={-{Latex[length=2mm]},thick}
+]
+\node[stage,fill=ProtocolBlue] (audit) {Fidelity audit\\and defect fixes};
+\node[stage,right=of audit] (base) {Base-model\\competence};
+\node[stage,right=of base] (screen) {Growth and\\protocol screens};
+\node[gate,right=of screen] (gate) {Acquisition, retention,\\and organicity gates};
+\node[stage,right=of gate,fill=ProtocolLightPurple] (confirm) {Ten-seed frozen\\confirmation};
+\node[stage,below=of confirm,fill=ProtocolRed] (matched) {Exact endpoint-matched\\controls};
+\node[stage,left=of matched] (extension) {Non-paper\\extensions};
+\draw[arrow] (audit) -- (base);
+\draw[arrow] (base) -- (screen);
+\draw[arrow] (screen) -- (gate);
+\draw[arrow] (gate) -- node[above,font=\scriptsize]{pass} (confirm);
+\draw[arrow] (confirm) -- (matched);
+\draw[arrow] (matched) -- (extension);
+\draw[arrow,dashed] (gate.south) |- node[pos=.25,right,font=\scriptsize]{mechanistic follow-up} (extension.east);
+\end{tikzpicture}
+}
+\caption{Selection and evidence flow. Screening informs frozen confirmatory settings; post-replication extensions remain outside the confirmatory claim.}
+\label{fig:selection-flow}
+\end{figure}

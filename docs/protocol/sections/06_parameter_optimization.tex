@@ -1,0 +1,91 @@
+\section{Parameter Selection and Optimization}
+
+\subsection{Fidelity boundary}
+\begin{draftpoints}
+  \item Paper-specified mechanisms are locked during the main search: base classes and curriculum, initial architecture, stacked denoising pretraining, partial global error for outlier selection, local SHL-AE plasticity, mature encoder freezing, reduced decoder and stability rates, next-layer propagation, and Gaussian intrinsic replay
+  \item Paper-compatible variables may be tuned because the publication does not provide a reproducible value or implementation: optimizer, activation, thresholds, outlier quota, phase lengths, batch size, weight decay, replay amount, and node-count policy
+  \item Any change to the local objective, global coupling, replay access, capacity matching, or locked curriculum is labeled as an extension or ablation rather than a literal replication
+\end{draftpoints}
+
+\begin{table}[htbp]
+\centering
+\caption{Parameter-fidelity boundary and selection evidence.}
+\label{tab:parameter-boundary}
+\scriptsize
+\begin{tabularx}{\textwidth}{p{2.5cm}p{2.4cm}p{3.3cm}p{2.8cm}Y}
+\toprule
+Parameter & Paper status & Values or policies examined & Selection criterion & Reporting treatment \\
+\midrule
+Base classes / order & Specified & $[1,7]\rightarrow[0,2,3,4,5,6,8,9]$ & Locked & Confirmatory \\
+Initial widths & Specified & $[200,100,75,20]$ & Locked & Confirmatory \\
+Plasticity weight scope & Specified & New encoder; reduced decoder & Locked & Confirmatory \\
+Replay distribution & Specified & Full-covariance class Gaussian & Locked for IR & Confirmatory \\
+Optimizer & Unspecified & Adam / AdamW; zero decay & Validation MSE and stability & Paper-compatible \\
+Activation & Unspecified & ReLU / historically plausible alternatives & Base MSE and threshold stability & Paper-compatible \\
+Threshold & Unspecified & Base percentiles and margins & Acquisition, retention, outliers & Paper-compatible \\
+Outlier quota & Unspecified & Fractions around 10\% & Quota convergence and MSE & Paper-compatible \\
+Phase length & Unspecified & Short to 1000 update interpretations & MSE per update and runtime & Paper-compatible \\
+Growth policy & Unspecified & Absolute, proportional, class and stream caps & Organicity and endpoint shape & Paper-compatible \\
+Global coupling & Not specified & 1--5 epochs; LR ratios 0.01--0.05 & Predeclared 10\% gain gate & Extension \\
+Predictive coding & Different objective & Local/global precision and usage rules & Three-seed macro MSE & Extension \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Optimization sequence}
+\begin{draftpoints}
+  \item Base-model training is optimized first so later growth is not compensating for a poorly trained initial representation
+  \item Clean original-data replay is optimized before intrinsic replay because it provides an upper bound on what the growth mechanism can achieve with ideal old-class samples
+  \item Growth-shape, funnel-shape, outlier-quota, early-stop, and training-protocol ablations determine whether architecture and performance depend on arbitrary scheduling choices
+  \item Candidates must pass acquisition, retention, outlier-convergence, and organicity gates before promotion; a visually paper-like width is not sufficient if most loops stop at a cap
+  \item Full confirmation uses frozen settings and unseen seeds relative to the final post-replication screen where possible
+\end{draftpoints}
+
+\subsection{Organic-growth evidence}
+\begin{draftpoints}
+  \item preregistered organicity criterion requires at least 80\% of growth loops to stop because the accepted outlier quota is reached
+  \item None of the main organic-growth screen policies passed this gate; most loops exhausted their allowance with unresolved outliers
+  \item cumulative-cap reference closely resembles the paper endpoint but has a zero quota-stop fraction, demonstrating that architectural resemblance alone is not evidence of demand-driven size discovery
+\end{draftpoints}
+
+\begin{table}[htbp]
+\centering
+\caption{Selected growth-policy screen outcomes from the organic-growth ablation.}
+\label{tab:organic-growth-screen}
+\scriptsize
+\begin{tabularx}{\textwidth}{Yp{1.5cm}p{2.4cm}p{1.8cm}p{1.8cm}p{1.8cm}}
+\toprule
+Policy & Macro MSE & Final widths & Quota-stop fraction & Exhausted loops & Decision \\
+\midrule
+Cumulative-cap reference & 0.03935 & $[225,135,83,40]$ & 0.000 & 12/12 & Not organic \\
+Absolute 1, stream ceiling $2\times$ & 0.12159 & $[250,170,91,60]$ & 0.083 & 11/12 & Reject \\
+Absolute 2, stream ceiling $2\times$ & 0.10437 & $[250,170,91,60]$ & 0.083 & 11/12 & Reject \\
+Absolute 1, class allowance $[4,5,2,3]$ & 0.04186 & $[212,115,81,29]$ & 0.000 & 12/12 & Reject \\
+Absolute 2, class allowance $[4,5,2,3]$ & 0.04854 & $[212,115,81,29]$ & 0.000 & 12/12 & Reject \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Post-replication promotion gate}
+\begin{draftpoints}
+  \item Global coupling is screened only after the replication verdict and is promoted if it improves macro MSE by at least 10\% without materially increasing forgetting
+  \item Five all-weight coupling epochs at 0.05 of the base learning rate pass this gate with screen MSE 0.03609 versus 0.04120 for the baseline
+  \item promoted candidate is then compared with a paired NDL baseline and an exact endpoint-matched conventional learner on full curricula using seeds 45--47
+\end{draftpoints}
+
+\begin{table}[htbp]
+\centering
+\caption{Post-replication NDL global-coupling screen.}
+\label{tab:coupling-screen}
+\small
+\begin{tabularx}{\textwidth}{Yp{2.0cm}p{2.0cm}p{2.2cm}p{2.1cm}}
+\toprule
+Condition & Macro MSE & Ratio to baseline & Positive forgetting & Gate \\
+\midrule
+NDL baseline & 0.04120 & 1.000 & 0.001363 & Reference \\
+3 epochs, LR ratio 0.05 & 0.03774 & 0.916 & 0.000692 & Fail: $<10\%$ gain \\
+Decoder-only, 3 epochs & 0.03941 & 0.957 & 0.001001 & Fail \\
+5 epochs, LR ratio 0.05 & \textbf{0.03609} & \textbf{0.876} & \textbf{0.000518} & \textbf{Promote} \\
+\bottomrule
+\end{tabularx}
+\end{table}

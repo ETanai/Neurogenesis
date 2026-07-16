@@ -1,0 +1,82 @@
+\section{Qualitative Reconstruction Comparison}
+
+\subsection{Original qualitative evidence}
+\begin{draftpoints}
+  \item original paper presents reconstructed digits after each new class and reports that NDL+IR retains recognizable previously learned digits more consistently than CL+IR \parencite{draelos2017neurogenesis}
+  \item These panels are important because a small mean error difference may correspond either to visibly improved strokes or to diffuse pixel-level changes that are difficult to interpret semantically
+  \item original images do not provide a controlled local comparison because they use the authors' models, samples, and undocumented training choices
+\end{draftpoints}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.95\textwidth]{original_reconstructions.png}
+\caption{Original paper reconstruction comparison. Panel A shows CL+IR and panel B NDL+IR as classes are introduced; this figure is reproduced as the qualitative target, not as local replication evidence \parencite{draelos2017neurogenesis}.}
+\label{fig:original-reconstructions}
+\end{figure}
+
+\subsection{Preserved local diagnostic}
+\begin{draftpoints}
+  \item workspace preserves one local MLflow partial-reconstruction diagnostic, which confirms that the logging pipeline can hold fixed samples and reconstruct them through multiple depths
+  \item diagnostic is not a matched six-condition MNIST result and must not be used to rank CL, NDL, or replay regimes
+  \item noisy lower-depth outputs illustrate why qualitative panels need depth labels, fixed sample identities, and per-image error values rather than unannotated example images
+\end{draftpoints}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.82\textwidth]{local_partial_reconstruction_diagnostic.png}
+\caption{Only preserved local partial-reconstruction diagnostic. Columns are divided into learned and unlearned samples and rows show partial reconstructions. This artifact demonstrates instrumentation only; it is not a confirmatory comparison between methods.}
+\label{fig:local-qualitative-diagnostic}
+\end{figure}
+
+\subsection{Required matched reconstruction grid}
+\begin{draftpoints}
+  \item definitive qualitative comparison requires rerunning all primary conditions with the same fixed test indices, preprocessing, seed policy, and curriculum checkpoints
+  \item Grid rows should contain the input, base model, CL no replay, NDL no replay, CL original-data replay, NDL original-data replay, CL intrinsic replay, NDL intrinsic replay, and optimized NDL
+  \item Columns should contain fixed examples from base classes, early incoming classes, late incoming classes, and deliberately difficult high-error examples
+  \item Each panel should record condition, seed, class, sample index, curriculum step, depth, full-image MSE, and foreground MSE
+  \item \missingartifact{The required matched checkpoint set and reconstruction PNGs are not preserved in the repository; the protocol therefore specifies the panel but does not fabricate it from unrelated runs.}
+\end{draftpoints}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+cell/.style={draw,minimum width=16mm,minimum height=8mm,font=\tiny,align=center},
+label/.style={font=\tiny,align=right},
+missing/.style={draw,fill=ProtocolLightPurple,minimum width=16mm,minimum height=8mm,font=\tiny,align=center}
+]
+\foreach \x/\name in {0/Base 1,1/Base 7,2/Early 0,3/Middle 4,4/Late 9,5/Hard case}{
+  \node[cell] at (1.6*\x,0) {\name};
+}
+\foreach \y/\name in {1/Input,2/Base model,3/CL no replay,4/NDL no replay,5/CL original,6/NDL original,7/CL intrinsic,8/NDL intrinsic,9/Optimized NDL}{
+  \node[label,anchor=east] at (-1.0,-0.8*\y) {\name};
+  \foreach \x in {0,...,5}{\node[missing] at (1.6*\x,-0.8*\y) {fixed\\sample};}
+}
+\end{tikzpicture}
+\caption{Planned matched reconstruction grid. Every method must reconstruct the same fixed images at the same curriculum checkpoint; cells remain a documented rerun requirement rather than being filled with unmatched examples.}
+\label{fig:planned-reconstruction-grid}
+\end{figure}
+
+\begin{table}[htbp]
+\centering
+\caption{Manifest required for every qualitative reconstruction panel.}
+\label{tab:qualitative-manifest}
+\scriptsize
+\begin{tabularx}{\textwidth}{p{2.8cm}Y}
+\toprule
+Field group & Required fields \\
+\midrule
+Panel identity & figure, row, column, condition, seed \\
+Sample identity & dataset split, class ID, immutable sample index, learned/unlearned status \\
+Training state & curriculum step, most recently learned class, architecture widths \\
+Reconstruction & network depth, full-image MSE, foreground MSE, input path, output path \\
+Provenance & checkpoint path, configuration snapshot, code revision \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Qualitative interpretation rules}
+\begin{draftpoints}
+  \item Visual comparisons must be made from fixed samples selected before inspecting model outputs; cherry-picked best or worst examples should be reported separately
+  \item Recognition-like judgments should remain descriptive because the replication does not include a blinded human-rating protocol or a fixed downstream classifier
+  \item Qualitative claims should agree with per-image and class-level error values; disagreements should be discussed as evidence that pixel MSE and perceived stroke quality capture different properties
+\end{draftpoints}

@@ -1,0 +1,108 @@
+\section{Quantitative Replication Results}
+
+\subsection{Ten-seed MNIST confirmation}
+\begin{draftpoints}
+  \item \draftkey{Central result}opposite published ordering; NDL+IR 0.06395 versus matched CL+IR 0.02367 macro MSE
+  \item \draftkey{Intrinsic ratio}2.70$\times$ macro MSE; forgetting 0.01531 versus 0.00742; worse acquisition-sensitive quality and retention
+  \item \draftkey{Replay-independent pattern}NDL below matched CL with original-data replay and with no replay; not solely an IR-generator failure
+  \item \draftkey{No-replay nuance}lower NDL forgetting; worse macro and foreground MSE; stability--plasticity trade-off, not dominance
+\end{draftpoints}
+
+\begin{table}[htbp]
+\centering
+\caption{Ten-seed MNIST endpoint results. Values are means over seeds 42--51; confidence intervals are shown for the primary macro-MSE endpoint.}
+\label{tab:mnist-main-results}
+\scriptsize
+\begin{tabularx}{\textwidth}{Yp{2.4cm}p{1.7cm}p{1.8cm}p{2.2cm}p{1.5cm}p{1.8cm}}
+\toprule
+Condition & Macro MSE (95\% CI) & Foreground MSE & Positive forgetting & Endpoint widths & Updates & Parameters \\
+\midrule
+CL + original data & 0.01508 [0.01498, 0.01517] & 0.06091 & 0.000009 & $[207,105,77,23]$ & 1,113 & 389,343 \\
+CL + intrinsic replay & 0.02367 [0.02329, 0.02405] & 0.08410 & 0.00742 & $[232,140,91,44]$ & 1,113 & 463,978 \\
+CL, no replay & 0.02588 [0.02547, 0.02629] & 0.10956 & 0.00897 & seed-matched & 1,113 & 390,097 mean \\
+NDL + original data & 0.04733 [0.04678, 0.04788] & 0.19388 & 0.000222 & near $[207,105,77,23]$ & 13,674 & 390,233 mean \\
+NDL + intrinsic replay & 0.06395 [0.06226, 0.06565] & 0.24402 & 0.01531 & $[232,140,91,44]$ & 88,292 & 463,978 \\
+NDL, no replay & 0.04944 [0.04830, 0.05059] & 0.19113 & 0.00187 & seed-matched & 14,668 & 390,097 mean \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{performance_comparison.png}
+\caption{Ten-seed MNIST confirmation. Bars show mean macro reconstruction MSE, foreground-pixel MSE, and mean positive forgetting with 95\% confidence intervals. Lower is better in every panel. Source tables: \artifact{mnist_condition_metrics.csv} and \artifact{mnist_seed_metrics.csv}.}
+\label{fig:mnist-performance}
+\end{figure}
+
+\subsection{Claim-direction ratios}
+\begin{draftpoints}
+  \item \draftkey{Reading rule}ratio $<1$ favors NDL; all macro-MSE ratios $>1$
+  \item \draftkey{Macro-MSE ratios}original data 3.14; intrinsic replay 2.70; no replay 1.91
+  \item \draftkey{Forgetting exception}no-replay NDL advantage; simultaneous total-reconstruction deficit
+\end{draftpoints}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.92\textwidth]{claim_direction_comparison.png}
+\caption{Direction of the replicated MNIST effects relative to capacity-matched CL. A ratio of one indicates parity; values above one indicate larger error or forgetting for NDL. Source: \artifact{mnist_claim_ratios.csv}.}
+\label{fig:claim-direction}
+\end{figure}
+
+\subsection{Per-class reconstruction}
+\begin{draftpoints}
+  \item \draftkey{Robustness}broad ordering across base and incremental digits; no single-class or single-seed explanation
+  \item \draftkey{Interpretation}base-class error = retention; incoming-class error = acquisition; pair with positive forgetting
+  \item \draftkey{Coverage}10 observations per condition/class; confidence intervals; 600-row seed table
+\end{draftpoints}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{per_class_comparison.png}
+\caption{Final per-class MNIST reconstruction error after the full curriculum. Points summarize seeds 42--51 and distinguish the six architecture/replay conditions. Source tables: \artifact{mnist_per_class_summary.csv} and \artifact{mnist_per_class_seed.csv}.}
+\label{fig:per-class-results}
+\end{figure}
+
+\subsection{SD-19 feasibility comparison}
+\begin{draftpoints}
+  \item \draftkey{Macro MSE}CL 0.00385; NDL 0.00711; identical final architecture; NDL $\approx1.85\times$ worse
+  \item \draftkey{Foreground MSE}CL 0.04362; NDL 0.08257; approximately twofold gap
+  \item \draftkey{Retention and cost}NDL forgetting roughly one order larger; model updates roughly 100$\times$
+\end{draftpoints}
+
+\begin{table}[htbp]
+\centering
+\caption{Three-seed NIST SD-19 feasibility results, means over seeds 42--44.}
+\label{tab:sd19-results}
+\small
+\begin{tabularx}{\textwidth}{Yp{1.8cm}p{1.8cm}p{1.8cm}p{1.6cm}p{2.9cm}}
+\toprule
+Condition & Macro MSE & Foreground MSE & Positive forgetting & Updates & Final widths \\
+\midrule
+CL + original data & 0.00385 & 0.04362 & 0.000096 & 72 & $[1100,600,350,70]$ \\
+NDL + original data & 0.00711 & 0.08257 & 0.001454 & 7,253 & $[1100,600,350,70]$ \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.88\textwidth]{sd19_feasibility_comparison.png}
+\caption{Three-seed SD-19 feasibility comparison of reconstruction, forgetting, growth completion, and computational effort. Source tables: \artifact{sd19_plotted_summary.csv}, \artifact{sd19_seed_metrics.csv}, and \artifact{sd19_per_class_seed.csv}.}
+\label{fig:sd19-results}
+\end{figure}
+
+\subsection{Training resources}
+\begin{draftpoints}
+  \item \draftkey{Wall time}matched conventional AE 104--110 s; NDL 158--715 s; controlled seed 42
+  \item \draftkey{IR overhead}6.88$\times$ slower; 2.31$\times$ peak live CUDA allocation versus same-size AE
+  \item \draftkey{Efficiency verdict}additional computation without lower reconstruction error; stronger negative endpoint conclusion
+\end{draftpoints}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.92\textwidth]{training_resource_comparison.png}
+\caption{Seed-42 training-time, update-count, memory, and performance benchmark comparing NDL with ordinary autoencoders at the same endpoint sizes. Source tables: \artifact{training_resource_conditions.csv} and \artifact{training_resource_ratios.csv}.}
+\label{fig:training-resources}
+\end{figure}
+
+\FloatBarrier

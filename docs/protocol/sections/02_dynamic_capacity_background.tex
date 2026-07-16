@@ -1,0 +1,89 @@
+\section{Dynamic-Capacity Neural Networks}
+
+\subsection{Taxonomy}
+\begin{draftpoints}
+  \item Dynamic-capacity methods can be classified by the structure that changes: neurons, channels, layers, modules, paths, individual connections, or sparse masks
+  \item second axis is the trigger for change: residual or reconstruction error, task boundaries, gradients, activation or weight orthogonality, sparsity penalties, resource constraints, or learned architecture parameters
+  \item NDL occupies the neuron-level, monotonic-growth, reconstruction-error-triggered branch and differs from methods that preserve a fixed active parameter budget through pruning or rewiring \parencite{draelos2017neurogenesis}
+\end{draftpoints}
+
+\begin{figure}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+  node distance=5mm and 7mm,
+  root/.style={draw,rounded corners,fill=ProtocolLightPurple,minimum width=31mm,minimum height=8mm,align=center,font=\small\bfseries},
+  branch/.style={draw,rounded corners,fill=ProtocolBlue,minimum width=30mm,minimum height=9mm,align=center,font=\scriptsize},
+  leaf/.style={draw,rounded corners,fill=white,minimum width=27mm,minimum height=8mm,align=center,font=\scriptsize},
+  arrow/.style={-{Latex[length=2mm]},thick}
+]
+\node[root] (root) {Dynamic capacity};
+\node[branch,below left=of root,xshift=-38mm] (grow) {Monotonic growth};
+\node[branch,below=of root] (bidirect) {Grow--prune};
+\node[branch,below right=of root,xshift=38mm] (fixed) {Fixed-budget change};
+\node[leaf,below left=of grow] (constructive) {Constructive units\\Cascade-Correlation};
+\node[leaf,below right=of grow] (continual) {Continual expansion\\NDL, DEN, DER};
+\node[leaf,below left=of bidirect] (morph) {Function morphism\\Net2Net};
+\node[leaf,below right=of bidirect] (gp) {Resource-aware\\NeST, MorphNet};
+\node[leaf,below left=of fixed] (prune) {Pruning\\Slimming, $L_0$};
+\node[leaf,below right=of fixed] (sparse) {Sparse rewiring\\SET, RigL};
+\draw[arrow] (root) -- (grow);
+\draw[arrow] (root) -- (bidirect);
+\draw[arrow] (root) -- (fixed);
+\draw[arrow] (grow) -- (constructive);
+\draw[arrow] (grow) -- (continual);
+\draw[arrow] (bidirect) -- (morph);
+\draw[arrow] (bidirect) -- (gp);
+\draw[arrow] (fixed) -- (prune);
+\draw[arrow] (fixed) -- (sparse);
+\end{tikzpicture}
+}
+\caption{Mechanism-oriented taxonomy for the literature review. NDL is placed under monotonic continual expansion because it adds neurons in response to reconstruction error and does not subsequently prune them.}
+\label{fig:dynamic-capacity-taxonomy}
+\end{figure}
+
+\subsection{Constructive and continual expansion}
+\begin{draftpoints}
+  \item Cascade-Correlation is an early constructive method that starts with a minimal network and installs new hidden units selected for correlation with residual error \parencite{fahlman1990cascade}
+  \item Progressive Neural Networks add and freeze task-specific columns, using structural expansion as direct protection against interference \parencite{rusu2016progressive}
+  \item Dynamically Expandable Networks combine selective retraining, expansion, and regularization when new tasks cannot be represented adequately by existing capacity \parencite{yoon2018den}
+  \item DER expands representation capacity for class-incremental learning and links architectural growth explicitly to continual-learning stability \parencite{yan2021der}
+  \item GradMax and NORTH* replace NDL's reconstruction trigger with gradient-maximization or orthogonality criteria, illustrating that where and how to add units remains an active optimization problem \parencite{evci2022gradmax,maile2022north}
+  \item PathNet and Learn to Grow adapt modular paths or sharing decisions rather than inserting individual neurons, broadening dynamic capacity from width growth to learned structural reuse \parencite{fernando2017pathnet,li2019learn}
+\end{draftpoints}
+
+\subsection{Removal, rewiring, and morphism}
+\begin{draftpoints}
+  \item Magnitude pruning, Network Slimming, and learned $L_0$ gates remove low-importance weights or channels and therefore optimize capacity by deletion rather than acquisition \parencite{han2015deep,liu2017network,louizos2018learning}
+  \item Dynamic Network Surgery allows removed connections to be spliced back, while NeST and MorphNet combine growth and shrinkage so added capacity remains provisional \parencite{guo2016dynamic,dai2018nest,gordon2018morphnet}
+  \item Sparse Evolutionary Training and RigL keep the active parameter count approximately fixed while changing connectivity, contrasting with NDL's monotonically increasing dense width \parencite{mocanu2018scalable,evci2020rigging}
+  \item Net2Net and network morphism change width or depth while preserving the represented function, whereas NDL deliberately adds randomly initialized capacity to improve a function that currently reconstructs novel inputs poorly \parencite{chen2016net2net,wei2016network}
+  \item Differentiable architecture search optimizes architecture parameters over a search space rather than reacting online to reconstruction failures \parencite{liu2019darts}
+\end{draftpoints}
+
+\begin{table}[htbp]
+\centering
+\caption{Representative dynamic-capacity methods and their relationship to NDL.}
+\label{tab:dynamic-capacity-methods}
+\small
+\begin{tabularx}{\textwidth}{p{2.7cm}p{2.4cm}p{2.8cm}YY}
+\toprule
+Method & Capacity action & Trigger & Old-function protection & Relation to NDL \\
+\midrule
+Cascade-Correlation & Add units & Residual correlation & Candidate freezing & Early constructive precursor \\
+Progressive Networks & Add columns & Task boundary & Freeze old columns & Stronger structural isolation \\
+DEN / DER & Add or duplicate units & New-task loss & Selective retraining & Continual expansion peers \\
+GradMax / NORTH* & Add units & Gradient / orthogonality & Initialization criterion & Alternative growth signals \\
+NeST / MorphNet & Grow and prune & Accuracy and resources & Compact resynthesis & Bidirectional capacity \\
+SET / RigL & Rewire sparse edges & Magnitude / gradient & Fixed active budget & Topology change without width growth \\
+Net2Net & Widen or deepen & Planned transformation & Function preservation & Safer initialization contrast \\
+NDL & Add neurons & Layer reconstruction error & Frozen mature encoder plus replay & Replicated method \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Positioning statement}
+\begin{draftpoints}
+  \item NDL is best described as an interpretable, local, growth-only dynamic-capacity rule whose principal novelty is the use of partial autoencoder reconstruction error to locate representational bottlenecks \parencite{draelos2017neurogenesis}
+  \item replication tests whether this interpretability translates into better acquisition or retention after controlling for replay, endpoint capacity, and computation
+\end{draftpoints}

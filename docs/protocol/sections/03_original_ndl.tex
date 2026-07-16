@@ -1,0 +1,56 @@
+\section{Original NDL Architecture and Claims}
+
+\subsection{Architecture and growth rule}
+\begin{draftpoints}
+  \item published model is a symmetric stacked autoencoder whose encoder widths decrease toward a latent bottleneck and whose decoder mirrors those widths \parencite{draelos2017neurogenesis}
+  \item MNIST base training uses digits 1 and 7 with encoder widths $[200,100,75,20]$; the remaining digits arrive sequentially in the order $[0,2,3,4,5,6,8,9]$ \parencite{draelos2017neurogenesis}
+  \item For each depth, samples whose global reconstruction error exceeds a stored threshold are treated as outliers; growth continues until the allowed outlier count is reached or a maximum growth allowance is exhausted
+  \item During the plasticity phase, mature encoder weights are frozen, new encoder weights use the base learning rate, and decoder weights use one hundredth of that rate; a stability phase then trains all weights in the current local autoencoder at the reduced rate \parencite{draelos2017neurogenesis}
+  \item New lower-level columns must be propagated into the next layer so the expanded representation can influence deeper features
+\end{draftpoints}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.82\linewidth]{original_architecture.png}
+\caption{Original NDL illustration reproduced from Draelos et al. The figure motivates neuron insertion when a novel input is reconstructed poorly and shows that reconstruction can be evaluated at several autoencoder depths \parencite{draelos2017neurogenesis}.}
+\label{fig:original-architecture}
+\end{figure}
+
+\subsection{Intrinsic replay}
+\begin{draftpoints}
+  \item Intrinsic replay stores a class-conditional mean and Cholesky factor of the top-level latent covariance rather than retaining old training images \parencite{draelos2017neurogenesis}
+  \item Replay samples are drawn from the fitted latent Gaussian and decoded through the current autoencoder; these generated approximations are mixed with the incoming class during stabilization
+  \item Intrinsic replay must be evaluated separately from neuron growth because replay can improve retention even when architecture remains fixed
+\end{draftpoints}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.56\linewidth]{original_intrinsic_replay.png}
+\caption{Intrinsic replay mechanism from the original paper: class-conditional latent statistics are sampled and decoded to approximate previously observed classes \parencite{draelos2017neurogenesis}.}
+\label{fig:original-ir}
+\end{figure}
+
+\subsection{Published experimental claims}
+\begin{draftpoints}
+  \item central MNIST claim is directional: NDL with intrinsic replay is reported to reconstruct learned digits slightly better than a fixed, capacity-matched conventional learner with intrinsic replay \parencite{draelos2017neurogenesis}
+  \item paper also reports that growth contributes useful new capacity, preserves previously learned representations, and remains beneficial in the larger NIST SD-19 experiment
+  \item publication does not fully specify optimizer family, activation functions, thresholds, outlier quota, phase-length interpretation, or the new-node-count policy, preventing binary-equivalent reconstruction from the text alone
+\end{draftpoints}
+
+\begin{table}[htbp]
+\centering
+\caption{Published claims and corresponding replication tests.}
+\label{tab:claims-to-test}
+\small
+\begin{tabularx}{\textwidth}{p{3.2cm}YYp{2.5cm}}
+\toprule
+Claim & Original evidence & Replication measure & Decision rule \\
+\midrule
+NDL+IR exceeds CL+IR & Figure 4 reconstruction curves & Ten-seed macro MSE and forgetting & Direction and confidence intervals \\
+Growth protects old classes & Curves and reconstruction images & Per-class MSE and positive forgetting & Lower old-class degradation \\
+Capacity emerges from demand & Layer-growth plots & Quota stops, cap exhaustion, final widths & Demand satisfied before cap \\
+Cost is manageable & Complexity discussion & Updates, runtime, CUDA and RSS peaks & Cost relative to matched CL \\
+Effect extends to SD-19 & Figures 6--8 & Three-seed SD-19 MSE and forgetting & Same qualitative ordering \\
+\bottomrule
+\end{tabularx}
+\end{table}

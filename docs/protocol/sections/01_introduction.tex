@@ -1,0 +1,33 @@
+\section{Introduction and Research Questions}
+
+\subsection{Problem and motivation}
+\begin{draftpoints}
+  \item \draftkey{Problem}new-class acquisition without degradation of earlier representations; fixed-capacity stability--plasticity conflict
+  \item \draftkey{NDL premise}excessive reconstruction error $\rightarrow$ insufficient capacity $\rightarrow$ new neurons at the affected depth \parencite{draelos2017neurogenesis}
+  \item \draftkey{Primary outcomes}macro reconstruction MSE; foreground-pixel MSE; positive forgetting; architecture growth; computational cost; no classification-accuracy substitute
+  \item \draftkey{Controlled question}dynamic-capacity advantage after matching replay, endpoint parameters, optimization effort, and cap effects
+\end{draftpoints}
+
+\subsection{Confirmatory research questions}
+\begin{draftpoints}
+  \item \draftkey{RQ1: fidelity}error detection $\rightarrow$ insertion $\rightarrow$ local plasticity $\rightarrow$ replay stabilization $\rightarrow$ next-layer propagation \parencite{draelos2017neurogenesis}
+  \item \draftkey{RQ2: growth}NDL versus exact endpoint-capacity-matched CL; identical replay regime
+  \item \draftkey{RQ3: replay}none versus original data versus intrinsic; acquisition, retention, growth demand, final quality
+  \item \draftkey{RQ4: organic capacity}quota-satisfied stops versus exhausted class/stream allowances
+  \item \draftkey{RQ5: robustness}optimizer; threshold; phase length; outlier quota; geometry; early stopping; global coupling
+  \item \draftkey{RQ6: transfer}MNIST ordering versus larger NIST SD-19 feasibility result
+\end{draftpoints}
+
+\subsection{Exploratory and qualitative questions}
+\begin{draftpoints}
+  \item \draftkey{RQ7: training behavior}incoming-class acquisition; old-class retention; updates spent; unresolved outliers
+  \item \draftkey{RQ8: visual quality}aggregate MSE versus recognizable base-, early-, and late-class reconstructions
+  \item \draftkey{RQ9: later mechanisms}predictive coding; post-class global coupling; stability--plasticity change
+\end{draftpoints}
+
+\subsection{Scope and evidential boundaries}
+\begin{draftpoints}
+  \item \draftkey{Confirmatory boundary}paper-shaped NDL and capacity-matched CL only; predictive coding and global coupling = extensions
+  \item \draftkey{Preserved evidence}complete seed-level and per-class exports; incomplete checkpoints and raw logs; stronger endpoint than trajectory claims
+  \item \draftkey{Original-data boundary}several graphical-only outcomes; directional comparison unless machine-readable values exist
+\end{draftpoints}

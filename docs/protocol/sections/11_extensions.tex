@@ -1,0 +1,75 @@
+\section{Post-Replication Extensions}
+
+\subsection{Predictive-coding optimizer}
+\begin{draftpoints}
+  \item predictive-coding extension replaces ordinary end-to-end reconstruction gradients with iterative activity inference and local adjacent-layer prediction losses
+  \item comparison uses a fixed capacity and therefore asks whether a different update rule improves stability or plasticity, not whether dynamic growth itself is beneficial
+  \item With original-data replay, predictive coding has macro MSE 0.02902 versus 0.01498 for backpropagation; without replay it has 0.03964 versus 0.02595
+  \item Usage-dependent plasticity changes macro MSE by less than one percent and does not improve the trade-off
+  \item Settled prediction energy falls below initialization, indicating stable activity inference; the performance deficit is therefore attributed to representation learning rather than divergent inference
+\end{draftpoints}
+
+\begin{table}[htbp]
+\centering
+\caption{Three-seed predictive-coding extension, means over seeds 42--44. Lower is better.}
+\label{tab:predictive-coding-results}
+\small
+\begin{tabularx}{\textwidth}{p{2.5cm}Yp{2.0cm}p{2.1cm}p{2.2cm}}
+\toprule
+Replay & Optimizer & Macro MSE & Foreground MSE & Positive forgetting \\
+\midrule
+Original data & Backpropagation & \textbf{0.01498} & \textbf{0.06030} & \textbf{0.000008} \\
+Original data & Predictive coding & 0.02902 & 0.11778 & 0.000079 \\
+Original data & PC + usage plasticity & 0.02915 & 0.11847 & 0.000081 \\
+None & Backpropagation & \textbf{0.02595} & \textbf{0.11142} & 0.00917 \\
+None & Predictive coding & 0.03964 & 0.16399 & \textbf{0.00905} \\
+None & PC + usage plasticity & 0.03980 & 0.16441 & 0.00908 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.90\textwidth]{predictive_coding_comparison.png}
+\caption{Predictive-coding extension across replay and plasticity conditions. The figure reports reconstruction, forgetting, settled energy, and weight displacement. Source tables: \artifact{predictive_coding_aggregate.csv} and \artifact{predictive_coding_seed_metrics.csv}.}
+\label{fig:predictive-coding}
+\end{figure}
+
+\subsection{Global reconstruction coupling}
+\begin{draftpoints}
+  \item promoted NDL extension adds five short all-weight end-to-end reconstruction epochs after each class at 0.05 of the base learning rate
+  \item coupling reduces full-curriculum macro MSE from 0.04816 to 0.02289 and removes measured positive forgetting in the three-seed comparison
+  \item optimized NDL still loses to the exact endpoint-matched CL control, which reaches macro MSE 0.01282 with about one twenty-fourth as many incremental updates
+  \item useful ingredient is therefore global reconstruction coupling after local growth, not evidence that the growth process itself is superior to training a fixed network at the same final capacity
+\end{draftpoints}
+
+\begin{table}[htbp]
+\centering
+\caption{Full-curriculum global-coupling extension, means over seeds 45--47.}
+\label{tab:optimized-ndl-results}
+\scriptsize
+\begin{tabularx}{\textwidth}{Yp{1.5cm}p{1.7cm}p{1.5cm}p{1.5cm}p{1.6cm}p{1.7cm}}
+\toprule
+Condition & Macro MSE & Foreground MSE & Forgetting & Updates & Runtime (s) & Parameters \\
+\midrule
+NDL baseline & 0.04816 & 0.19444 & 0.000179 & 13,330 & 102.1 & 389,343 \\
+Optimized NDL & 0.02289 & 0.08931 & 0.000000 & 27,147 & 183.7 & 394,489 \\
+Exact endpoint-matched CL & \textbf{0.01282} & \textbf{0.05282} & 0.000000 & \textbf{1,113} & \textbf{89.3} & 394,489 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.92\textwidth]{post_replication_optimization.png}
+\caption{Post-replication optimization screens and full-curriculum comparison. Global coupling improves NDL substantially, but exact endpoint-matched CL remains more accurate and efficient. Source tables: \artifact{post_replication_optimization_screen.csv}, \artifact{post_replication_optimization_full_seed.csv}, and \artifact{post_replication_optimization_per_class.csv}.}
+\label{fig:post-replication-optimization}
+\end{figure}
+
+\subsection{Status of extension evidence}
+\begin{draftpoints}
+  \item Predictive coding and global coupling are exploratory because they were designed after the main replication result and use three-seed screens
+  \item These experiments can generate mechanistic hypotheses but must not be merged into the confirmatory NDL estimate or described as a successful replication of Draelos et al. \parencite{draelos2017neurogenesis}
+\end{draftpoints}
+
+\FloatBarrier
